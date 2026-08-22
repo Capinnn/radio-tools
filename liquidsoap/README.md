@@ -92,3 +92,64 @@ liquidsoap --check scripts/live.liq
 ../.venv/bin/python -m pytest tests -q
 ```
 
+## Smoke test
+
+`bin/smoke.sh` runs the full end-to-end chain — start Icecast + Liquidsoap,
+capture 20 seconds of MP3 audio, verify Icecast reports `audio/mpeg` and at
+least one listener, then stop the chain.  It exits nonzero on any failure.
+
+```bash
+bin/smoke.sh
+```
+
+Override the capture duration or leave the chain running for inspection:
+
+```bash
+bin/smoke.sh --duration 30
+bin/smoke.sh --keep
+```
+
+## Running the station (start, verify, stop)
+
+Prerequisites: Icecast 2.4.4 and Liquidsoap 2.2.x installed, the repo
+virtualenv at `../.venv` with `playlistgen` available, and a music directory
+of tagged MP3s.
+
+1. **Create the secrets file** (once, gitignored):
+
+```bash
+cp config/secrets.env.example config/secrets.env
+chmod 600 config/secrets.env
+# Edit config/secrets.env — replace the source password with a 12+ char value.
+```
+
+2. **Generate the playlist** into `data/playlist.m3u`:
+
+```bash
+bin/gen-playlist.sh --source /tmp/radiotest/music
+```
+
+3. **Start the chain**:
+
+```bash
+bin/start.sh
+```
+
+4. **Verify the stream**:
+
+```bash
+# Capture 20 seconds of MP3 audio and check the file type:
+curl -s -m 20 http://127.0.0.1:8000/radio.mp3 > /tmp/stream.bin
+wc -c /tmp/stream.bin          # ~350 KB expected for 20s at 128 kbps
+
+# Icecast status — listener count, bitrate, now-playing title:
+curl -s http://127.0.0.1:8000/status-json.xsl | python3 -m json.tool \
+  | grep -E 'listener|bitrate|title|server_type'
+```
+
+5. **Stop the chain**:
+
+```bash
+bin/stop.sh
+```
+
