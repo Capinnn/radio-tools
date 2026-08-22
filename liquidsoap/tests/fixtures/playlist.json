@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-08-21T14:00:00",
+  "seed": 42,
+  "daypart": "Morning",
+  "target_duration": 1800,
+  "actual_duration": 432.5,
+  "tracks": [
+    {
+      "position": 1,
+      "path": "/music/artist - title.mp3",
+      "artist": "Artist Name",
+      "title": "Song Title",
+      "category": "A",
+      "duration": 234.5
+    },
+    {
+      "position": 2,
+      "path": "/music/other.mp3",
+      "artist": "Other Artist",
+      "title": "Other Song",
+      "category": "B",
+      "duration": 198.0
+    }
+  ]
+}
+

@@ -1,0 +1,7 @@
+config/secrets.env
+config/secrets.xml
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+

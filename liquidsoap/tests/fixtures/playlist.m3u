@@ -1,0 +1,6 @@
+#EXTM3U
+#EXTINF:234,Artist Name - Song Title
+/music/artist - title.mp3
+#EXTINF:198,Other Artist - Other Song
+/music/other.mp3
+

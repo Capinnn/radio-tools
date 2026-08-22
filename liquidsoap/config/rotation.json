@@ -1,0 +1,36 @@
+{
+  "categories": {
+    "A": { "sph": 4, "description": "Current / heavy" },
+    "B": { "sph": 3, "description": "Medium" },
+    "C": { "sph": 2, "description": "Light" },
+    "NEW": { "sph": 1, "description": "New music" }
+  },
+  "rules": {
+    "artist_gap": 2,
+    "title_gap": 1,
+    "category_gap": 1
+  },
+  "dayparts": {
+    "Morning": {
+      "start": "06:00",
+      "end": "10:00",
+      "weights": { "A": 1.5, "B": 1.0, "C": 0.8, "NEW": 0.5 }
+    },
+    "Middrive": {
+      "start": "10:00",
+      "end": "15:00",
+      "weights": { "A": 1.2, "B": 1.0, "C": 1.0, "NEW": 0.8 }
+    },
+    "Evening": {
+      "start": "15:00",
+      "end": "20:00",
+      "weights": { "A": 0.8, "B": 1.0, "C": 1.2, "NEW": 1.0 }
+    },
+    "Overnight": {
+      "start": "20:00",
+      "end": "06:00",
+      "weights": { "A": 0.5, "B": 0.8, "C": 1.5, "NEW": 0.3 }
+    }
+  }
+}
+
