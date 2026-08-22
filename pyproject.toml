@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "broadcast"
+version = "0.1.0"
+description = "CLI broadcast toolkit for personal radio setups"
+requires-python = ">=3.11"
+dependencies = [
+    "mutagen>=1.45",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+playlistgen = "broadcast.playlistgen:cli"
+schedule = "broadcast.schedule:cli"
+trackcheck = "broadcast.trackcheck:cli"
+logbook = "broadcast.logbook:cli"
+broadcast-clock = "broadcast.utilities:broadcast_clock_cli"
+intro-outro = "broadcast.utilities:intro_outro_cli"
+countdown = "broadcast.utilities:countdown_cli"
+
+[tool.setuptools]
+packages = ["broadcast"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
