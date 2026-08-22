@@ -25,8 +25,11 @@
   <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm-1 2v6l4.5 2.7.9-1.6L13 12V7z"/></symbol>
   <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M12 2 8.5 5.5 12 9V6.5a5.5 5.5 0 1 1-5.4 6.6l-2 .4A7.5 7.5 0 1 0 12 4.5z"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zm-6 8a6 6 0 0 0 5 5.9V20H8v2h8v-2h-3v-3.1a6 6 0 0 0 5-5.9h-2a4 4 0 0 1-8 0z"/></symbol>
+  <symbol id="i-fade-up" viewBox="0 0 24 24"><path d="M5 17h14v2H5zM12 4l-5 5h3v6h4V9h3z"/></symbol>
+  <symbol id="i-fade-down" viewBox="0 0 24 24"><path d="M5 5h14v2H5zm7 3l5 5h-3V9zM9 13h3v6h-4v-6H5z"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M4 4h13l3 3v13H4zm3 1v5h8V5zm-1 9v5h12v-5z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 4h5v5h-2V6.4l-3.3 3.3-1.4-1.4L17.6 5H16zm-3.7 8.7l1.4-1.4 3.3 3.3V13h2v5h-5v-2h2.6zM3 5l5 5-5 5 1.4 1.4 5-5 4.6-4.6L8.4 5H5V3h5v5H8.4l4.6 4.6L15 9.4 18.6 13l-2.6-2.6-2.4 2.4L16.2 16H21v-2h-2.4L14 9.4 11 12.4 7.4 8.8 4 12.2 3 11z"/></symbol>
 </svg>
 
 <div class="app">
@@ -45,10 +48,10 @@
     </div>
 
     <nav class="topnav">
-      <button class="tbtn" id="openRotation"><svg class="ic"><use href="#i-rotate"></use></svg>Rotation</button>
-      <button class="tbtn" id="openSchedule"><svg class="ic"><use href="#i-clock"></use></svg>Schedule</button>
-      <button class="tbtn" id="openSettings"><svg class="ic"><use href="#i-gear"></use></svg>Settings</button>
-      <button class="tbtn square" id="openHelp" title="Keyboard shortcuts (?)">?</button>
+      <button class="tbtn square iconbtn" id="openRotation" title="Rotation rules" aria-label="Rotation rules"><svg class="ic"><use href="#i-rotate"></use></svg></button>
+      <button class="tbtn square iconbtn" id="openSchedule" title="Scheduled events" aria-label="Scheduled events"><svg class="ic"><use href="#i-clock"></use></svg></button>
+      <button class="tbtn square iconbtn" id="openSettings" title="Settings" aria-label="Settings"><svg class="ic"><use href="#i-gear"></use></svg></button>
+      <button class="tbtn square iconbtn" id="openHelp" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic"><use href="#i-shuffle"></use></svg></button>
     </nav>
   </header>
 
@@ -145,9 +148,9 @@
       </div>
 
       <div class="air-row">
-        <button class="air-btn fade-in" id="fadeInBtn">FADE IN<small>Shift + F</small></button>
-        <button class="air-btn talk" id="talkBtn">TALK OVER<small>T &mdash; hold or click</small></button>
-        <button class="air-btn fade-out" id="fadeOutBtn">FADE OUT<small>F</small></button>
+        <button class="air-btn fade-in" id="fadeInBtn"><svg class="ic"><use href="#i-fade-up"></use></svg>FADE IN<small>Shift + F</small></button>
+        <button class="air-btn talk" id="talkBtn"><svg class="ic"><use href="#i-mic"></use></svg>TALK OVER<small>T — hold or click</small></button>
+        <button class="air-btn fade-out" id="fadeOutBtn"><svg class="ic"><use href="#i-fade-down"></use></svg>FADE OUT<small>F</small></button>
       </div>
 
       <div class="meter">

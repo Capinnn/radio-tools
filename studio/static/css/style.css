@@ -7,6 +7,7 @@
   --panel:     #14171c;
   --panel-2:   #191d23;
   --raised:    #21262e;
+  --raised-2:  #2b323c;
   --line:      #262c35;
   --line-soft: #1d222a;
 
@@ -53,6 +54,16 @@ html, body {
 
 button { font: inherit; color: inherit; cursor: pointer; }
 input, select { font: inherit; color: inherit; }
+
+/* Universal pressed-state feedback — rule 7. Every button shifts a half-step
+   toward its active tint on press so the user feels the click even before
+   the handler runs. :active sits below :hover so hover keeps priority. */
+button:not(:disabled):active {
+  filter: brightness(0.88);
+  transform: translateY(1px);
+}
+button.tp:not(:disabled):active { transform: scale(0.96); }
+button.air-btn:not(:disabled):active { transform: scale(0.98); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -145,6 +156,9 @@ input, select { font: inherit; color: inherit; }
 }
 .tbtn:hover { background: var(--raised); color: var(--text); }
 .tbtn.square { width: 34px; padding: 0; justify-content: center; font-weight: 700; }
+/* Icon-only variant: a little larger, the icon gets a touch more breathing room. */
+.tbtn.iconbtn { width: 36px; height: 36px; }
+.tbtn.iconbtn .ic { width: 17px; height: 17px; }
 
 /* --------------------------------------------------------------- panels */
 
@@ -548,16 +562,24 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: 0.45; }
   align-items: center;
   justify-content: center;
   gap: 3px;
-  height: 58px;
+  height: 64px;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 1.1px;
   color: var(--text-dim);
   transition: background var(--fast), color var(--fast), border-color var(--fast);
 }
+.air-btn .ic {
+  width: 18px;
+  height: 18px;
+  margin-bottom: 1px;
+  opacity: 0.7;
+  transition: opacity var(--fast);
+}
+.air-btn:hover .ic { opacity: 1; }
 .air-btn small {
   font-size: 9.5px;
   font-weight: 500;
@@ -574,6 +596,7 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: 0.45; }
   border-color: var(--orange);
   color: #241200;
 }
+.air-btn.talk.active .ic { opacity: 1; color: #241200; }
 .air-btn.talk.active small { color: #4a2600; }
 .air-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .air-btn:disabled:hover { background: var(--panel-2); color: var(--text-dim); border-color: var(--line); }
@@ -975,6 +998,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.62); }
   color: var(--text-faint);
   transition: color var(--fast), background var(--fast);
 }
+.rot-row:hover .del { color: var(--text-dim); }
 .rot-row .del:hover { color: var(--red); background: var(--raised); }
 
 .sched-add {
