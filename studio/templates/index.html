@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADIO STUDIO</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<link rel="icon" href="data:,">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6.5 4.5h4v15h-4zm7 0h4v15h-4z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5h2.5v14H6zm14 0v14L9.5 12z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M15.5 5H18v14h-2.5zM4 5l10.5 7L4 19z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 0 4.55 13.46l4.24 4.25 1.42-1.42-4.25-4.24A7.5 7.5 0 0 0 10.5 3zm0 2a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M20 3v12.2a3.3 3.3 0 1 1-2-3.03V7.4l-8 1.7v8.1a3.3 3.3 0 1 1-2-3.03V6.3z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 1 7.46 5.1l-1.9.7A6 6 0 0 0 6.6 10H10v2H3V5h2v2.6A8 8 0 0 1 12 4zm7 8h2v7h-2v-2.6A8 8 0 0 1 4.54 14.9l1.9-.7A6 6 0 0 0 17.4 14H14v-2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 16.6 15.7 4.9l3.4 3.4L7.4 20H4zM17.1 3.5l1.4-1.4a1.2 1.2 0 0 1 1.7 0l1.7 1.7a1.2 1.2 0 0 1 0 1.7l-1.4 1.4z"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><path d="M9 5h2v2H9zm4 0h2v2h-2zM9 9h2v2H9zm4 0h2v2h-2zm-4 4h2v2H9zm4 0h2v2h-2zm-4 4h2v2H9zm4 0h2v2h-2z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm9 3.5c0 .5 0 1-.1 1.4l2 1.6-2 3.4-2.4-1a7.6 7.6 0 0 1-2.4 1.4L15.7 21h-3.9l-.4-2.6a7.6 7.6 0 0 1-2.4-1.4l-2.4 1-2-3.4 2-1.6a8 8 0 0 1 0-2.8l-2-1.6 2-3.4 2.4 1a7.6 7.6 0 0 1 2.4-1.4L11.8 3h3.9l.4 2.6c.9.3 1.7.8 2.4 1.4l2.4-1 2 3.4-2 1.6c.1.4.1.9.1 1z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2a7 7 0 1 1 0 14 7 7 0 0 1 0-14zm-1 2v6l4.5 2.7.9-1.6L13 12V7z"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M12 2 8.5 5.5 12 9V6.5a5.5 5.5 0 1 1-5.4 6.6l-2 .4A7.5 7.5 0 1 0 12 4.5z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zm-6 8a6 6 0 0 0 5 5.9V20H8v2h8v-2h-3v-3.1a6 6 0 0 0 5-5.9h-2a4 4 0 0 1-8 0z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M4 4h13l3 3v13H4zm3 1v5h8V5zm-1 9v5h12v-5z"/></symbol>
+</svg>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="wordmark">RADIO STUDIO</div>
+
+    <div class="air" id="airPill" data-on="false">
+      <span class="air-dot"></span>
+      <span id="airLabel">OFF AIR</span>
+    </div>
+
+    <div class="clock-wrap">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="clock-sub"><span id="clockDate">&mdash;</span><span class="dot-sep"></span><span id="daypartLabel">&mdash;</span></div>
+    </div>
+
+    <nav class="topnav">
+      <button class="tbtn" id="openRotation"><svg class="ic"><use href="#i-rotate"></use></svg>Rotation</button>
+      <button class="tbtn" id="openSchedule"><svg class="ic"><use href="#i-clock"></use></svg>Schedule</button>
+      <button class="tbtn" id="openSettings"><svg class="ic"><use href="#i-gear"></use></svg>Settings</button>
+      <button class="tbtn square" id="openHelp" title="Keyboard shortcuts (?)">?</button>
+    </nav>
+  </header>
+
+  <main class="workspace">
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="panel library">
+      <div class="panel-head">
+        <h2>Library</h2>
+        <span class="tally" id="libCount">0 tracks</span>
+        <button class="ghost" id="scanBtn" title="Rescan the music folder">
+          <svg class="ic"><use href="#i-refresh"></use></svg>Scan
+        </button>
+      </div>
+
+      <div class="lib-search">
+        <svg class="ic"><use href="#i-search"></use></svg>
+        <input type="search" id="searchInput" placeholder="Search title, artist, album, genre" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="lib-filters">
+        <select id="filterGenre" aria-label="Filter by genre"><option value="">All genres</option></select>
+        <select id="filterArtist" aria-label="Filter by artist"><option value="">All artists</option></select>
+        <select id="filterCategory" aria-label="Filter by rotation category"><option value="">All categories</option></select>
+        <select id="sortBy" aria-label="Sort">
+          <option value="artist">Artist</option>
+          <option value="title">Title</option>
+          <option value="genre">Genre</option>
+          <option value="duration">Length</option>
+          <option value="bpm">BPM</option>
+          <option value="added">Recently added</option>
+          <option value="played">Recently played</option>
+        </select>
+        <label class="bpm-range">
+          BPM
+          <input type="number" id="bpmMin" min="0" max="300" placeholder="min" inputmode="numeric">
+          <span>&ndash;</span>
+          <input type="number" id="bpmMax" min="0" max="300" placeholder="max" inputmode="numeric">
+        </label>
+        <button class="ghost small" id="clearFilters">Clear</button>
+      </div>
+
+      <div class="lib-head">
+        <span class="c-title">Title / Artist</span>
+        <span class="c-cat">Rotation</span>
+        <span class="c-genre">Genre</span>
+        <span class="c-bpm">BPM</span>
+        <span class="c-time">Time</span>
+        <span class="c-act"></span>
+      </div>
+
+      <div class="lib-rows" id="libRows" tabindex="0"></div>
+
+      <div class="empty" id="libEmpty" hidden>
+        <svg class="ic xl"><use href="#i-note"></use></svg>
+        <p class="empty-title">No tracks yet</p>
+        <ol class="empty-steps">
+          <li>Open <b>Settings</b> and point the music folder at your collection &mdash; or drop files anywhere on this window.</li>
+          <li>Press <b>Scan</b> to read tags from every mp3, flac, m4a, wav and ogg it finds.</li>
+          <li>Click a track to send it to the queue, then press <b>Play</b>.</li>
+        </ol>
+        <button class="solid" id="emptyOpenSettings">Choose a music folder</button>
+      </div>
+
+      <div class="lib-foot">
+        <span id="libSelection">Click a track to queue it. Double-click to play it now.</span>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="panel console">
+      <div class="now" id="nowCard">
+        <div class="now-art" id="nowArt"><svg class="ic"><use href="#i-note"></use></svg></div>
+        <div class="now-text">
+          <div class="now-status" id="nowStatus">Standby</div>
+          <div class="now-title" id="nowTitle">Nothing loaded</div>
+          <div class="now-artist" id="nowArtist">Queue a track to begin</div>
+          <div class="now-meta" id="nowMeta"></div>
+        </div>
+      </div>
+
+      <div class="seek">
+        <input type="range" id="seekBar" min="0" max="1000" value="0" step="1" aria-label="Seek">
+        <div class="seek-times">
+          <span id="elapsed">0:00</span>
+          <span id="remaining">-0:00</span>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button class="tp" id="prevBtn" title="Previous (Shift + Left)"><svg class="ic"><use href="#i-prev"></use></svg></button>
+        <button class="tp play" id="playBtn" title="Play / Pause (Space)"><svg class="ic"><use href="#i-play"></use></svg></button>
+        <button class="tp" id="nextBtn" title="Next (Shift + Right)"><svg class="ic"><use href="#i-next"></use></svg></button>
+      </div>
+
+      <div class="air-row">
+        <button class="air-btn fade-in" id="fadeInBtn">FADE IN<small>Shift + F</small></button>
+        <button class="air-btn talk" id="talkBtn">TALK OVER<small>T &mdash; hold or click</small></button>
+        <button class="air-btn fade-out" id="fadeOutBtn">FADE OUT<small>F</small></button>
+      </div>
+
+      <div class="meter">
+        <div class="meter-head"><span>Output</span><span id="meterPeak">-inf dB</span></div>
+        <div class="meter-rows">
+          <div class="meter-row"><span class="ch">L</span><div class="meter-track"><div class="meter-fill" id="vuL"></div><div class="meter-peak" id="peakL"></div></div></div>
+          <div class="meter-row"><span class="ch">R</span><div class="meter-track"><div class="meter-fill" id="vuR"></div><div class="meter-peak" id="peakR"></div></div></div>
+        </div>
+        <div class="meter-scale"><span>-40</span><span>-20</span><span>-12</span><span>-6</span><span>0</span></div>
+      </div>
+
+      <div class="mix">
+        <label class="mix-row">
+          <span class="mix-label">Master<b id="volValue">85%</b></span>
+          <input type="range" id="volume" min="0" max="100" value="85">
+        </label>
+        <label class="mix-row">
+          <span class="mix-label">Crossfade<b id="xfValue">4.0s</b></span>
+          <input type="range" id="crossfade" min="0" max="12" step="0.5" value="4">
+        </label>
+        <div class="mix-row mic">
+          <button class="ghost wide" id="micBtn"><svg class="ic"><use href="#i-mic"></use></svg><span id="micLabel">Enable mic</span></button>
+          <input type="range" id="micGain" min="0" max="100" value="70" disabled aria-label="Mic level">
+        </div>
+        <p class="mic-note" id="micNote">Mic mixes into the output for monitoring on this machine.</p>
+      </div>
+    </section>
+
+    <!-- ---------------------------------------------------------------- -->
+    <section class="panel queue">
+      <div class="panel-head">
+        <h2>Queue</h2>
+        <span class="tally" id="queueTally">empty</span>
+        <button class="ghost" id="clearQueue">Clear</button>
+      </div>
+
+      <div class="upnext" id="upNextCard">
+        <div class="upnext-label">Next up</div>
+        <div class="upnext-title" id="upNextTitle">Nothing queued</div>
+        <div class="upnext-countdown" id="upNextCountdown">&mdash;</div>
+      </div>
+
+      <div class="autodj">
+        <label class="switch">
+          <input type="checkbox" id="autoDjToggle">
+          <span class="track"></span>
+          <span class="switch-text">Auto-DJ<small id="autoDjHint">off</small></span>
+        </label>
+        <button class="ghost small" id="fillNow">Fill now</button>
+      </div>
+
+      <div class="queue-rows" id="queueRows"></div>
+
+      <div class="queue-empty" id="queueEmpty">
+        <p>Queue is empty.</p>
+        <p class="dim">Click tracks in the library to add them, or turn on Auto-DJ to let the rotation rules fill it.</p>
+      </div>
+
+      <div class="playlists">
+        <div class="playlists-head">
+          <span>Playlists</span>
+          <button class="ghost small" id="savePlaylist"><svg class="ic"><use href="#i-save"></use></svg>Save queue</button>
+        </div>
+        <div class="playlist-rows" id="playlistRows"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<div class="drop-veil" id="dropVeil" hidden>
+  <div class="drop-inner"><svg class="ic xl"><use href="#i-plus"></use></svg>Drop audio files to add them to the library</div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<!-- Rotation ---------------------------------------------------------- -->
+<dialog class="sheet wide" id="rotationDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Rotation</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+  <p class="sheet-note">
+    Auto-DJ picks from these categories. <b>Spins/hour</b> is the target for a normal hour;
+    <b>artist gap</b> blocks the same artist from repeating inside that many minutes;
+    the daypart columns scale the target up or down at that time of day.
+    Current daypart: <b id="rotationDaypart">&mdash;</b>.
+  </p>
+  <div class="rot-table" id="rotTable"></div>
+  <div class="sheet-foot">
+    <button class="ghost" id="addCategory"><svg class="ic"><use href="#i-plus"></use></svg>Add category</button>
+    <span class="grow"></span>
+    <span class="dim" id="rotationSaved"></span>
+    <button class="solid" id="saveRotation">Save rotation</button>
+  </div>
+</dialog>
+
+<!-- Schedule ---------------------------------------------------------- -->
+<dialog class="sheet" id="scheduleDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Schedule</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+  <p class="sheet-note">Events fire while this page is open. A daily event runs once each day at that time.</p>
+  <div class="sched-add">
+    <input type="time" id="schedTime" value="08:00" aria-label="Time">
+    <select id="schedAction" aria-label="Action">
+      <option value="playlist">Play playlist</option>
+      <option value="category">Start category</option>
+    </select>
+    <select id="schedTarget" aria-label="Target"></select>
+    <select id="schedMode" aria-label="Queue mode">
+      <option value="replace">Replace queue</option>
+      <option value="append">Add to queue</option>
+    </select>
+    <select id="schedRepeat" aria-label="Repeat">
+      <option value="daily">Daily</option>
+      <option value="once">Once</option>
+    </select>
+    <button class="solid" id="addSchedule"><svg class="ic"><use href="#i-plus"></use></svg>Add</button>
+  </div>
+  <div class="sched-rows" id="schedRows"></div>
+</dialog>
+
+<!-- Settings ---------------------------------------------------------- -->
+<dialog class="sheet" id="settingsDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Settings</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+
+  <label class="field">
+    <span>Music folder</span>
+    <input type="text" id="musicDirInput" spellcheck="false" placeholder="/home/you/Music">
+    <small>Absolute path on this machine. Leave blank to use the bundled <code>studio/music</code> folder. Subfolders are scanned too.</small>
+  </label>
+  <div class="field-row">
+    <button class="solid" id="saveMusicDir">Save &amp; scan</button>
+    <span class="dim" id="musicDirNow"></span>
+  </div>
+
+  <label class="field">
+    <span>Fade length<b id="fadeValue">2.0s</b></span>
+    <input type="range" id="fadeSeconds" min="0.5" max="10" step="0.5" value="2">
+    <small>Used by the FADE IN and FADE OUT buttons.</small>
+  </label>
+
+  <label class="field">
+    <span>Talk-over level<b id="duckValue">20%</b></span>
+    <input type="range" id="duckLevel" min="0" max="60" step="1" value="20">
+    <small>Music drops to this level while TALK OVER is engaged.</small>
+  </label>
+
+  <label class="field">
+    <span>Auto-DJ tops up when the queue drops below<b id="minQueueValue">3</b></span>
+    <input type="range" id="autoDjMinQueue" min="1" max="12" step="1" value="3">
+  </label>
+</dialog>
+
+<!-- Track editor ------------------------------------------------------ -->
+<dialog class="sheet" id="editDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Edit track</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+  <div class="edit-grid">
+    <label class="field"><span>Title</span><input type="text" id="editTitle"></label>
+    <label class="field"><span>Artist</span><input type="text" id="editArtist"></label>
+    <label class="field"><span>Album</span><input type="text" id="editAlbum"></label>
+    <label class="field"><span>Genre</span><input type="text" id="editGenre"></label>
+    <label class="field"><span>Year</span><input type="text" id="editYear" inputmode="numeric" maxlength="4"></label>
+    <label class="field"><span>BPM</span><input type="number" id="editBpm" min="0" max="300"></label>
+    <label class="field"><span>Rotation category</span><select id="editCategory"></select></label>
+  </div>
+  <div class="edit-file" id="editFile"></div>
+  <div class="sheet-foot">
+    <button class="ghost danger" id="deleteTrack">Remove from library</button>
+    <span class="grow"></span>
+    <button class="solid" id="saveTrack">Save</button>
+  </div>
+</dialog>
+
+<!-- Save playlist ----------------------------------------------------- -->
+<dialog class="sheet narrow" id="playlistDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Save queue as playlist</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+  <label class="field"><span>Name</span><input type="text" id="playlistName" placeholder="Sunday drive"></label>
+  <div class="sheet-foot">
+    <span class="dim" id="playlistCount"></span>
+    <span class="grow"></span>
+    <button class="solid" id="confirmPlaylist">Save</button>
+  </div>
+</dialog>
+
+<!-- Shortcuts --------------------------------------------------------- -->
+<dialog class="sheet narrow" id="helpDialog">
+  <form method="dialog" class="sheet-head">
+    <h3>Keyboard shortcuts</h3>
+    <button class="ghost square" value="close"><svg class="ic"><use href="#i-x"></use></svg></button>
+  </form>
+  <dl class="keys">
+    <dt>Space</dt><dd>Play / pause</dd>
+    <dt>F</dt><dd>Fade out</dd>
+    <dt>Shift + F</dt><dd>Fade in</dd>
+    <dt>T</dt><dd>Talk over (hold, or tap to latch)</dd>
+    <dt>&larr; &rarr;</dt><dd>Seek 5 seconds</dd>
+    <dt>Shift + &larr; &rarr;</dt><dd>Previous / next track</dd>
+    <dt>&uarr; &darr;</dt><dd>Master volume</dd>
+    <dt>A</dt><dd>Toggle Auto-DJ</dd>
+    <dt>/</dt><dd>Focus search</dd>
+    <dt>Esc</dt><dd>Close dialog / clear search</dd>
+    <dt>?</dt><dd>This list</dd>
+  </dl>
+</dialog>
+
+<audio id="deckA" preload="auto" crossorigin="anonymous"></audio>
+<audio id="deckB" preload="auto" crossorigin="anonymous"></audio>
+<input type="file" id="filePicker" multiple accept=".mp3,.flac,.m4a,.wav,.ogg" hidden>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

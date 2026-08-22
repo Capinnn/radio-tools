@@ -1,0 +1,74 @@
+[
+  {
+    "path": "/tmp/radiotest/music/Hot_Track02.mp3",
+    "artist": "Velvet Static",
+    "title": "Midnight Drive",
+    "album": null,
+    "duration": 75.04979591836735,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Hot_Track05.mp3",
+    "artist": "MonoMyth",
+    "title": "Turbo Youth",
+    "album": null,
+    "duration": 95.0334693877551,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Medium_Track03.mp3",
+    "artist": "The Cartographers",
+    "title": "Paper Planes",
+    "album": null,
+    "duration": 150.04734693877552,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Medium_Track06.mp3",
+    "artist": "Velvet Static",
+    "title": "Harbor Lights",
+    "album": null,
+    "duration": 130.03755102040816,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Power_Track01.mp3",
+    "artist": "MonoMyth",
+    "title": "Neon Pulse",
+    "album": null,
+    "duration": 90.04408163265306,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Power_Track08.mp3",
+    "artist": "The Cartographers",
+    "title": "Iron Skyline",
+    "album": null,
+    "duration": 110.02775510204081,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Slow_Track04.mp3",
+    "artist": "Aurelia",
+    "title": "Glass Hour",
+    "album": null,
+    "duration": 210.05061224489796,
+    "category": null,
+    "replaygain_track_gain": null
+  },
+  {
+    "path": "/tmp/radiotest/music/Slow_Track07.mp3",
+    "artist": "Aurelia",
+    "title": "North Star",
+    "album": null,
+    "duration": 240.03918367346938,
+    "category": null,
+    "replaygain_track_gain": null
+  }
+]

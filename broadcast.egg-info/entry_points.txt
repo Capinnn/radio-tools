@@ -1,0 +1,8 @@
+[console_scripts]
+broadcast-clock = broadcast.utilities:broadcast_clock_cli
+countdown = broadcast.utilities:countdown_cli
+intro-outro = broadcast.utilities:intro_outro_cli
+logbook = broadcast.logbook:cli
+playlistgen = broadcast.playlistgen:cli
+schedule = broadcast.schedule:cli
+trackcheck = broadcast.trackcheck:cli

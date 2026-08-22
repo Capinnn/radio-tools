@@ -217,3 +217,22 @@ class TestCLI:
             assert Path("library.json").exists()
             data = json.loads(Path("library.json").read_text())
             assert len(data) > 0
+
+def test_category_keys_case_insensitive(music_library, rotation_config):
+    """Config keys like 'Power' must match detected 'POWER' categories."""
+    import json as _json
+    tracks = scan_folder(str(music_library))
+    rotation = _json.loads(rotation_config.read_text())
+    # Rewrite config with title-case keys (what a human/UI would write)
+    rotation["categories"] = {k.title(): v for k, v in rotation["categories"].items()}
+    dayparts = rotation.get("dayparts", {})
+    for dp in dayparts.values():
+        dp["weights"] = {k.title(): v for k, v in dp["weights"].items()}
+    engine = RotationEngine(tracks, rotation, seed=42)
+    # _sph must use real spins-per-hour, not the 0.5 uncategorised fallback
+    detected = next(t for t in tracks if t.get("category"))
+    sph = engine._sph(detected["category"])
+    base = rotation["categories"][detected["category"].title()]["sph"]
+    assert sph == base * 1.0 or sph > 0.5, (
+        f"expected sph={base} for {detected['category']}, got {sph} (fallback 0.5 means mismatch)"
+    )

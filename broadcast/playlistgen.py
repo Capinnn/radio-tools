@@ -181,12 +181,20 @@ class RotationEngine:
         self.title_gap = int(self.rules.get("title_gap", 1))
         self.category_gap = int(self.rules.get("category_gap", 1))
         self.categories = rotation.get("categories", {})
+        # Normalise category keys to UPPERCASE (the convention produced by
+        # _detect_category) so configs written as "Power" or "power" still
+        # match detected tracks. Without this, a case mismatch silently
+        # collapses all categories to the 0.5 fallback weight.
+        self.categories = {
+            str(k).upper(): v for k, v in self.categories.items()
+        }
         self.weights = self._get_weights(daypart)
 
     def _get_weights(self, daypart: str | None) -> dict[str, float]:
         """Return the weight table for the given daypart, or defaults."""
         if daypart and daypart in self.rotation.get("dayparts", {}):
-            return self.rotation["dayparts"][daypart].get("weights", {})
+            weights = self.rotation["dayparts"][daypart].get("weights", {})
+            return {str(k).upper(): v for k, v in weights.items()}
         return {}
 
     def _category_weight(self, category: str | None) -> float:

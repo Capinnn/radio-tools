@@ -1,0 +1,96 @@
+{
+  "dayparts": {
+    "Morning": {
+      "start": "06:00",
+      "end": "10:00",
+      "rotation": "rotation.json"
+    },
+    "Middrive": {
+      "start": "10:00",
+      "end": "15:00",
+      "rotation": "rotation.json"
+    },
+    "Evening": {
+      "start": "15:00",
+      "end": "20:00",
+      "rotation": "rotation.json"
+    },
+    "Overnight": {
+      "start": "20:00",
+      "end": "06:00",
+      "rotation": "rotation.json"
+    }
+  },
+  "grid": {
+    "mon": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "tue": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "wed": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "thu": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "fri": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "sat": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ],
+    "sun": [
+      "Overnight",
+      "Overnight",
+      "Morning",
+      "Middrive",
+      "Middrive",
+      "Evening",
+      "Evening",
+      "Overnight"
+    ]
+  }
+}

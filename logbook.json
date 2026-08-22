@@ -1,0 +1,20 @@
+[
+  {
+    "timestamp": "2026-08-21T18:12:23",
+    "path": "/tmp/radiotest/music/Power_Track01.mp3",
+    "artist": "MonoMyth",
+    "title": "Neon Pulse",
+    "category": "Power",
+    "duration": 90.0,
+    "source": "manual"
+  },
+  {
+    "timestamp": "2026-08-21T18:12:23",
+    "path": "/tmp/radiotest/music/Hot_Track02.mp3",
+    "artist": "Velvet Static",
+    "title": "Midnight Drive",
+    "category": "Hot",
+    "duration": 75.0,
+    "source": "manual"
+  }
+]
