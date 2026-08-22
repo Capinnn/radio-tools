@@ -94,6 +94,35 @@ HISTORY_LIMIT = 400
 # Tag keys mutagen's "easy" interface exposes consistently across formats.
 EDITABLE_TAGS = ("title", "artist", "album", "genre", "date", "bpm")
 
+# WAV (and AIFF) carry raw ID3, which mutagen's easy wrapper does not cover:
+# those tags take Frame objects, not strings, so they need this mapping.
+ID3_FRAMES = {"title": "TIT2", "artist": "TPE1", "album": "TALB",
+              "genre": "TCON", "date": "TDRC", "bpm": "TBPM"}
+
+
+def _is_raw_id3(tags):
+    from mutagen.id3 import ID3
+    return isinstance(tags, ID3)
+
+
+def _tag_getter(tags):
+    """One accessor for both the easy mapping and raw ID3 frames."""
+    if _is_raw_id3(tags):
+        def get(*keys):
+            for key in keys:
+                frame = ID3_FRAMES.get(key)
+                if frame and frame in tags:
+                    return str(tags[frame])
+            return ""
+        return get
+
+    def get(*keys):
+        for key in keys:
+            if tags and tags.get(key):
+                return _first(tags.get(key))
+        return ""
+    return get
+
 
 def daypart_for_hour(hour):
     """Return the daypart id covering `hour` (0-23)."""
@@ -137,13 +166,13 @@ def read_tags(path):
         audio = None
 
     if audio is not None:
-        tags = audio.tags or {}
-        info["title"] = _first(tags.get("title"))
-        info["artist"] = _first(tags.get("artist") or tags.get("albumartist"))
-        info["album"] = _first(tags.get("album"))
-        info["genre"] = _first(tags.get("genre"))
-        info["year"] = _first(tags.get("date") or tags.get("year"))[:4]
-        info["bpm"] = _to_int(_first(tags.get("bpm")))
+        get = _tag_getter(audio.tags)
+        info["title"] = get("title")
+        info["artist"] = get("artist", "albumartist")
+        info["album"] = get("album")
+        info["genre"] = get("genre")
+        info["year"] = get("date", "year")[:4]
+        info["bpm"] = _to_int(get("bpm"))
         stream = getattr(audio, "info", None)
         if stream is not None:
             info["duration"] = round(float(getattr(stream, "length", 0) or 0), 3)
@@ -204,8 +233,8 @@ def read_art(path):
 def write_tags(path, fields):
     """Write tags back into the file itself. Returns True when it stuck.
 
-    WAV and a few odd files cannot hold the tags we want; the caller keeps the
-    edit in the library index either way, so the UI can say so honestly.
+    Some files cannot hold the tags we want; the caller keeps the edit in the
+    library index either way, so the UI can say so honestly.
     """
     try:
         audio = mutagen.File(path, easy=True)
@@ -213,14 +242,27 @@ def write_tags(path, fields):
             return False
         if audio.tags is None:
             audio.add_tags()
-        for key, value in fields.items():
-            if key not in EDITABLE_TAGS:
-                continue
-            text = str(value or "").strip()
-            if text:
-                audio.tags[key] = text
-            elif key in audio.tags:
-                del audio.tags[key]
+
+        if _is_raw_id3(audio.tags):
+            from mutagen.id3 import Frames
+            for key, value in fields.items():
+                frame_id = ID3_FRAMES.get(key)
+                if not frame_id:
+                    continue
+                audio.tags.delall(frame_id)
+                text = str(value or "").strip()
+                if text:
+                    audio.tags.add(Frames[frame_id](encoding=3, text=[text]))
+        else:
+            for key, value in fields.items():
+                if key not in EDITABLE_TAGS:
+                    continue
+                text = str(value or "").strip()
+                if text:
+                    audio.tags[key] = text
+                elif key in audio.tags:
+                    del audio.tags[key]
+
         audio.save()
         return True
     except Exception:
@@ -378,17 +420,23 @@ def pick_next(library, categories, history, now=None, exclude_ids=(), rng=None):
             weights.pop(index)
             order.append(chosen)
 
-    # Last resort: an unconfigured library still has to play something.
-    fallback = {"id": None, "name": "Unclassified", "minArtistGap": 0}
-    order.append(fallback)
+    if not order:
+        if any(t.get("category") for t in library):
+            # The library is categorised but the rotation ruled everything out
+            # (every category at zero spins, or nothing left after exclusions).
+            # Stalling is the honest answer; quietly playing off-rotation is not.
+            return None
+        # Nothing is categorised yet, so a fresh library still plays.
+        order = [{"id": None, "name": "Unclassified", "minArtistGap": 0}]
 
+    # Relax one rule at a time, and only after every category has been tried
+    # at the current strictness — otherwise a loose category would poach
+    # spins from a strict one that merely needed its artist gap dropped.
     for relax_step, (artist_gap, repeat) in enumerate(
             ((True, True), (True, False), (False, False))):
         for category in order:
-            if category["id"] is None:
-                pool = library
-            else:
-                pool = [t for t in library if t.get("category") == category["id"]]
+            pool = library if category["id"] is None else \
+                [t for t in library if t.get("category") == category["id"]]
             candidates = _eligible(pool, category, history, now, exclude_ids,
                                    recent_ids, artist_gap, repeat)
             if not candidates:
@@ -412,22 +460,24 @@ def plan_next(library, categories, history, count=1, now=None,
     working = list(history)
     exclude = set(exclude_ids)
     picks = []
-    for step in range(max(0, int(count))):
-        result = pick_next(library, categories, working, now=now,
+    # The clock walks forward with the plan, so each pick is judged at the
+    # moment it would actually air rather than all at `now`.
+    cursor = now
+    for _ in range(max(0, int(count))):
+        result = pick_next(library, categories, working, now=cursor,
                            exclude_ids=exclude, rng=rng)
         if not result:
             break
         track = result["track"]
         picks.append(result)
         exclude.add(track["id"])
-        # Space the simulated plays out by a typical track length so the
-        # artist-gap rule sees a realistic clock as the plan extends.
         working.insert(0, {
             "trackId": track["id"],
             "artist": track.get("artist", ""),
             "category": result["category"],
-            "at": now + (step + 1) * max(60.0, float(track.get("duration") or 180)),
+            "at": cursor,
         })
+        cursor += max(60.0, float(track.get("duration") or 180))
     return picks
 
 

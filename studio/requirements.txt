@@ -1,0 +1,5 @@
+Flask>=3.0
+mutagen>=1.47
+
+# tests
+pytest>=8.0

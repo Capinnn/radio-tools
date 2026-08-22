@@ -281,7 +281,23 @@ def api_rotation_next():
         count = 1
     exclude = payload.get("excludeIds")
     exclude = exclude if isinstance(exclude, list) else []
-    picks = core.plan_next(store.library(), store.categories(), store.history(),
+
+    categories = store.categories()
+    category_id = str(payload.get("categoryId") or "")
+    if category_id:
+        # A scheduled "start category X" restricts the pool to that one
+        # category; give it a target so an exhausted hourly quota (or a
+        # spins/hour of 0) cannot score it out of contention.
+        categories = [dict(c, spinsPerHour=max(1, c["spinsPerHour"]))
+                      for c in categories if c["id"] == category_id]
+        if not categories:
+            return jsonify({"error": "unknown category"}), 404
+        if not any(t.get("category") == category_id for t in store.library()):
+            # Do not let the engine's "play something" fallback quietly widen a
+            # scheduled category start to the whole library.
+            return jsonify({"picks": [], "reason": "no tracks in that category"})
+
+    picks = core.plan_next(store.library(), categories, store.history(),
                            count=count, exclude_ids=exclude)
     return jsonify({
         "picks": [{"track": p["track"], "category": p["category"],

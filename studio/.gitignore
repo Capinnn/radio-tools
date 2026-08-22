@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local state: library index, queue, playlists, rotation, schedule, history.
+data/*.json
+data/*.corrupt
+
+# Audio lives on disk, not in git. The folder is created on startup.
+music/
