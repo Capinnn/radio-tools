@@ -1,7 +1,7 @@
 # Live-assist output for Liquidsoap 2.2.
 
 radio_root = environment.get(
-  default="/home/calebpineda/radio-tools/liquidsoap",
+  default="/home/<you>/radio-tools/liquidsoap",
   "RADIO_ROOT"
 )
 playlist_path = environment.get(

@@ -13,7 +13,7 @@ placeholders from the environment and writes a mode-0600 runtime copy under
 `logs/`; no credential is stored in Git.
 
 ```bash
-cd /home/calebpineda/radio-tools/liquidsoap
+cd /home/<you>/radio-tools/liquidsoap
 cp config/secrets.env.example config/secrets.env
 chmod 600 config/secrets.env
 # Edit config/secrets.env and replace the source password placeholder.
@@ -35,7 +35,7 @@ bin/gen-playlist.sh --source /absolute/path/to/music
 bin/gen-playlist.sh --library /absolute/path/to/library.json
 ```
 
-The wrapper activates `/home/calebpineda/radio-tools/.venv`, calls the installed
+The wrapper activates `/home/<you>/radio-tools/.venv`, calls the installed
 `playlistgen` entry point, validates the JSON sidecar against the M3U, publishes
 both files atomically, and touches `data/playlist.trigger`. A failed generation
 leaves the currently playing hour untouched.
@@ -72,7 +72,7 @@ It generates immediately, then sleeps to the next local hour boundary. For
 cron, run the one-shot command at minute zero instead:
 
 ```cron
-0 * * * * /home/calebpineda/radio-tools/liquidsoap/bin/gen-playlist.sh --source /absolute/path/to/music >> /home/calebpineda/radio-tools/liquidsoap/logs/playlistgen.log 2>&1
+0 * * * * /home/<you>/radio-tools/liquidsoap/bin/gen-playlist.sh --source /absolute/path/to/music >> /home/<you>/radio-tools/liquidsoap/logs/playlistgen.log 2>&1
 ```
 
 Useful generation options are `--rotation`, `--daypart`, `--seed`, `--slot`,
