@@ -219,3 +219,193 @@ def test_unknown_api_route_returns_json_404(client):
     response = client.get("/api/does-not-exist")
     assert response.status_code == 404
     assert response.get_json()["error"] == "not found"
+
+
+# --------------------------------------------------------------- rotation gen
+#
+# /api/rotation/generate drives the broadcast playlistgen engine.  The
+# subprocess is faked with an injected runner so the tests do not depend on
+# the broadcast package being installed.
+
+def _fake_playlistgen_runner(library_paths):
+    """Build a fake runner that writes a valid M3U + JSON sidecar.
+
+    ``library_paths`` is the list of paths from the broadcast-format library
+    (in the order playlistgen would see them).  The fake picks the first 3.
+    """
+    def runner(cmd):
+        import json
+        # Find the -o output path in the cmd list.
+        out_path = cmd[cmd.index("-o") + 1]
+        tracks = []
+        for i, path in enumerate(library_paths[:3]):
+            tracks.append({
+                "position": i + 1,
+                "path": path,
+                "artist": f"Artist {i}",
+                "title": f"Title {i}",
+                "category": "A",
+                "duration": 120.0,
+            })
+        sidecar = {
+            "generated_at": "2026-08-21T14:00:00",
+            "seed": 42,
+            "daypart": "Morning",
+            "target_duration": 1800,
+            "actual_duration": 360.0,
+            "tracks": tracks,
+        }
+        import os
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w") as f:
+            f.write("#EXTM3U\n")
+            for t in tracks:
+                f.write(f"#EXTINF:{int(t['duration'])},{t['artist']} - {t['title']}\n")
+                f.write(f"{t['path']}\n")
+        sidecar_path = os.path.splitext(out_path)[0] + ".json"
+        with open(sidecar_path, "w") as f:
+            json.dump(sidecar, f)
+        return 0, "Generated playlist: 3 tracks", ""
+    return runner
+
+
+def _fake_failing_runner(cmd):
+    """A runner that simulates playlistgen crashing."""
+    return 1, "", "playlistgen: error: something broke"
+
+
+def test_rotation_generate_returns_ordered_track_ids(client, monkeypatch):
+    client.post("/api/library/scan")
+    library = client.get("/api/library").get_json()
+    # Assign categories so the mapping is exercised.
+    for track in library[:3]:
+        client.patch(f"/api/tracks/{track['id']}", json={"category": "power"})
+    for track in library[3:]:
+        client.patch(f"/api/tracks/{track['id']}", json={"category": "slow"})
+
+    # Build the list of paths the fake runner should "play", matching the
+    # studio library order.
+    studio_lib = client.store.library()
+    lib_paths = [t["path"] for t in studio_lib]
+
+    # Inject the fake runner into core.generate_rotation.
+    import core
+    original = core.generate_rotation
+    fake = _fake_playlistgen_runner(lib_paths)
+
+    def patched(library, categories, **kwargs):
+        return original(library, categories, runner=fake, **kwargs)
+
+    monkeypatch.setattr(core, "generate_rotation", patched)
+
+    response = client.post("/api/rotation/generate", json={"seed": 42})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["engine"] == "playlistgen"
+    assert payload["count"] == 3
+    assert isinstance(payload["trackIds"], list)
+    assert len(payload["trackIds"]) == 3
+    # Every returned id must be a valid studio track id.
+    studio_ids = {t["id"] for t in studio_lib}
+    assert all(tid in studio_ids for tid in payload["trackIds"])
+    # The order is deterministic (the fake picks the first 3).
+    assert payload["trackIds"] == [t["id"] for t in studio_lib[:3]]
+
+
+def test_rotation_generate_respects_category_mapping(client, monkeypatch):
+    """The broadcast library written for playlistgen must use A/B/C/... codes."""
+    import core, json, os, tempfile
+
+    client.post("/api/library/scan")
+    library = client.store.library()
+    # Categorise all tracks to exercise the mapping.
+    cats = client.get("/api/rotation").get_json()["categories"]
+    for i, track in enumerate(library):
+        cat_id = cats[i % len(cats)]["id"]
+        client.patch(f"/api/tracks/{track['id']}", json={"category": cat_id})
+
+    studio_lib = client.store.library()
+    lib_paths = [t["path"] for t in studio_lib]
+    fake = _fake_playlistgen_runner(lib_paths)
+    original = core.generate_rotation
+
+    def patched(library, categories, **kwargs):
+        return original(library, categories, runner=fake, **kwargs)
+
+    monkeypatch.setattr(core, "generate_rotation", patched)
+
+    # Inspect the broadcast library that would be written.
+    broadcast_lib = core.build_broadcast_library(studio_lib, cats)
+    code_map = core.CATEGORY_CODE_MAP
+    for i, track in enumerate(studio_lib):
+        cat_id = track.get("category") or ""
+        expected_code = code_map.get(cat_id)
+        assert broadcast_lib[i]["category"] == expected_code
+        assert broadcast_lib[i]["path"] == track["path"]
+
+    # Also check the rotation file has the right codes.
+    rotation = core.build_broadcast_rotation(cats)
+    for cat in cats:
+        code = code_map[cat["id"]]
+        assert code in rotation["categories"]
+        assert rotation["categories"][code]["sph"] == cat["spinsPerHour"]
+
+    response = client.post("/api/rotation/generate", json={"seed": 1})
+    assert response.status_code == 200
+
+
+def test_rotation_generate_error_path_falls_back(client, monkeypatch):
+    """When playlistgen fails, the endpoint returns fallback + warning."""
+    import core
+
+    original = core.generate_rotation
+
+    def failing(library, categories, **kwargs):
+        return original(library, categories, runner=_fake_failing_runner, **kwargs)
+
+    monkeypatch.setattr(core, "generate_rotation", failing)
+
+    client.post("/api/library/scan")
+    # Assign at least one category so plan_next can pick something.
+    lib = client.get("/api/library").get_json()
+    client.patch(f"/api/tracks/{lib[0]['id']}", json={"category": "power"})
+
+    response = client.post("/api/rotation/generate", json={"seed": 1})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["engine"] == "fallback"
+    assert payload["fallback"] is True
+    assert "warning" in payload
+    assert isinstance(payload["trackIds"], list)
+
+
+def test_rotation_generate_missing_playlistgen_falls_back(client, monkeypatch):
+    """When playlistgen is not installed, the endpoint falls back gracefully."""
+    import core
+
+    def not_found(library, categories, **kwargs):
+        raise core.RotationError("playlistgen is not installed.")
+
+    monkeypatch.setattr(core, "generate_rotation", not_found)
+
+    client.post("/api/library/scan")
+    lib = client.get("/api/library").get_json()
+    client.patch(f"/api/tracks/{lib[0]['id']}", json={"category": "power"})
+
+    response = client.post("/api/rotation/generate", json={})
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["engine"] == "fallback"
+    assert "playlistgen" in payload["warning"].lower()
+
+
+def test_rotation_generate_empty_library(client, monkeypatch):
+    """An empty library returns an empty trackIds list without error."""
+    import core
+
+    response = client.post("/api/rotation/generate", json={"seed": 1})
+    assert response.status_code == 200
+    payload = response.get_json()
+    # No tracks scanned yet, so the library is empty.
+    assert payload["count"] == 0
+    assert payload["trackIds"] == []

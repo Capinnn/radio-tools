@@ -306,6 +306,53 @@ def api_rotation_next():
     })
 
 
+@app.post("/api/rotation/generate")
+def api_rotation_generate():
+    """Drive the broadcast playlistgen engine to generate a 30-min block.
+
+    Accepts optional JSON: {hour, daypart, slot, seed, excludeIds}.
+    Returns {trackIds, daypart, seed, count, engine} on success.
+    Falls back to the studio's built-in rotation picker (plan_next) with a
+    ``fallback`` flag when playlistgen is unavailable.
+    """
+    payload = request.get_json(silent=True) or {}
+    hour = payload.get("hour")
+    daypart = payload.get("daypart")
+    slot = payload.get("slot", "30min")
+    seed = payload.get("seed")
+    exclude = payload.get("excludeIds")
+    exclude = exclude if isinstance(exclude, list) else []
+
+    library = store.library()
+    categories = store.categories()
+
+    try:
+        result = core.generate_rotation(
+            library, categories, hour=hour, daypart=daypart,
+            slot=slot, seed=seed,
+        )
+    except core.RotationError as exc:
+        # Graceful degradation: fall back to the built-in rotation picker.
+        picks = core.plan_next(library, categories, store.history(),
+                               count=max(1, int(payload.get("count", 3))),
+                               exclude_ids=exclude)
+        return jsonify({
+            "trackIds": [p["track"]["id"] for p in picks],
+            "daypart": core.daypart_for_hour(time.localtime().tm_hour),
+            "count": len(picks),
+            "engine": "fallback",
+            "fallback": True,
+            "warning": str(exc),
+        })
+
+    # Honour excludeIds by filtering them from the generated list.
+    if exclude:
+        excl = set(exclude)
+        result["trackIds"] = [t for t in result["trackIds"] if t not in excl]
+        result["count"] = len(result["trackIds"])
+    return jsonify(result)
+
+
 @app.get("/api/history")
 def api_history():
     return jsonify(store.history()[:100])

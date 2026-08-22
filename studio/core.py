@@ -10,6 +10,8 @@ import json
 import os
 import random
 import re
+import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -461,7 +463,7 @@ def plan_next(library, categories, history, count=1, now=None,
     exclude = set(exclude_ids)
     picks = []
     # The clock walks forward with the plan, so each pick is judged at the
-    # moment it would actually air rather than all at `now`.
+    # moment it would actually air rather than all at now.
     cursor = now
     for _ in range(max(0, int(count))):
         result = pick_next(library, categories, working, now=cursor,
@@ -479,6 +481,267 @@ def plan_next(library, categories, history, count=1, now=None,
         })
         cursor += max(60.0, float(track.get("duration") or 180))
     return picks
+
+
+# ---------------------------------------------------------------------------#
+# Broadcast rotation bridge
+# ---------------------------------------------------------------------------#
+#
+# The ``broadcast`` toolkit (../broadcast/playlistgen.py) has a richer rotation
+# engine than the studio's built-in picker: spins-per-hour targets, daypart
+# weight overrides, and artist/title/category gap rules.  The studio and the
+# broadcast package use different category vocabularies — the studio has
+# named categories (power, hot, medium, slow, specialty) while broadcast uses
+# short codes (A, B, C, NEW, ...).  The bridge below translates the studio's
+# settings into a broadcast-format rotation.json + library.json, invokes
+# ``playlistgen`` as a subprocess, and maps the generated playlist back to
+# studio track ids by matching file paths.
+
+# Studio category id -> broadcast category code.  The codes are conventional
+# radio rotation tiers: A=current/heavy, B=medium, C=light, D=slow, NEW=new.
+# The mapping is order-stable so the same studio config always produces the
+# same broadcast rotation file.
+CATEGORY_CODE_MAP = {
+    "power": "A",
+    "hot": "B",
+    "medium": "C",
+    "slow": "D",
+    "specialty": "NEW",
+}
+
+# Studio daypart id -> broadcast daypart name (the names playlistgen expects).
+DAYPART_NAME_MAP = {
+    "overnight": "Overnight",
+    "morning": "Morning",
+    "midday": "Middrive",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+}
+
+
+class RotationError(Exception):
+    """Raised when the broadcast rotation engine is unavailable or fails."""
+
+
+def _artist_gap_from_categories(categories):
+    """Pick a sensible artist_gap (in number-of-tracks) from the studio config.
+
+    playlistgen's artist_gap is a track count, while the studio's minArtistGap
+    is in minutes.  We translate the smallest non-zero minute gap into a
+    conservative track count (roughly gap_minutes / 4 minutes per track).
+    """
+    gaps = [c.get("minArtistGap", 0) for c in categories if c.get("minArtistGap")]
+    if not gaps:
+        return 2
+    minutes = min(gaps)
+    return max(1, int(minutes / 4))
+
+
+def build_broadcast_rotation(categories):
+    """Translate studio categories + daypart weights into broadcast rotation.json.
+
+    Returns a dict matching the format described in broadcast/formats.md:
+    ``{"categories": {code: {sph, description}}, "rules": {...},
+    "dayparts": {name: {start, end, weights}}}``.
+    """
+    broadcast_cats = {}
+    code_for = {}
+    for cat in categories:
+        code = CATEGORY_CODE_MAP.get(cat["id"], cat["id"].upper()[:1])
+        code_for[cat["id"]] = code
+        broadcast_cats[code] = {
+            "sph": int(cat.get("spinsPerHour", 0)),
+            "description": cat.get("name", cat["id"]),
+        }
+
+    artist_gap = _artist_gap_from_categories(categories)
+
+    dayparts = {}
+    for dp in DAYPARTS:
+        name = DAYPART_NAME_MAP.get(dp["id"], dp["name"])
+        weights = {}
+        for cat in categories:
+            code = code_for.get(cat["id"])
+            if code:
+                w = (cat.get("weights") or {}).get(dp["id"], 1.0)
+                weights[code] = float(w)
+        dayparts[name] = {
+            "start": f"{dp['start']:02d}:00",
+            "end": f"{dp['end']:02d}:00" if dp["end"] <= 24 else "24:00",
+            "weights": weights,
+        }
+
+    return {
+        "categories": broadcast_cats,
+        "rules": {
+            "artist_gap": artist_gap,
+            "title_gap": 1,
+            "category_gap": 1,
+        },
+        "dayparts": dayparts,
+    }
+
+
+def build_broadcast_library(library, categories):
+    """Translate the studio library into broadcast library.json format.
+
+    Each track becomes {path, artist, title, album, category, duration,
+    replaygain_track_gain}.  The studio category id is mapped to a broadcast
+    code; uncategorised tracks get category None.
+    """
+    code_for = {}
+    for cat in categories:
+        code = CATEGORY_CODE_MAP.get(cat["id"], cat["id"].upper()[:1])
+        code_for[cat["id"]] = code
+
+    out = []
+    for track in library:
+        cat_id = track.get("category") or ""
+        code = code_for.get(cat_id) if cat_id else None
+        out.append({
+            "path": track.get("path", ""),
+            "artist": track.get("artist"),
+            "title": track.get("title"),
+            "album": track.get("album") or None,
+            "category": code,
+            "duration": float(track.get("duration") or 0),
+            "replaygain_track_gain": None,
+        })
+    return out
+
+
+def find_playlistgen(venv_dir=None):
+    """Return the path to the playlistgen executable, or None if unavailable.
+
+    Looks for ../.venv/bin/playlistgen relative to the studio directory, then
+    falls back to a PATH lookup.  The caller can override the venv directory.
+    """
+    candidates = []
+    if venv_dir:
+        candidates.append(os.path.join(venv_dir, "bin", "playlistgen"))
+    # ../.venv relative to the studio directory (core.py lives in studio/).
+    studio_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_venv = os.path.join(os.path.dirname(studio_dir), ".venv")
+    candidates.append(os.path.join(repo_venv, "bin", "playlistgen"))
+    for path in candidates:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    # Last resort: rely on PATH.
+    from shutil import which
+    return which("playlistgen")
+
+
+def generate_rotation(library, categories, hour=None, daypart=None,
+                      slot="30min", seed=None, venv_dir=None,
+                      runner=None):
+    """Drive the broadcast playlistgen tool to produce an ordered queue.
+
+    Writes a temporary broadcast-format rotation.json and library.json, invokes
+    ``playlistgen --library <tmp> --rotation <tmp> --hour H --daypart D
+    --slot S --seed N -o <tmp.m3u>``, parses the JSON sidecar, and maps each
+    track back to a studio track id by matching the absolute file path.
+
+    Returns a dict: ``{"trackIds": [...], "daypart": str, "seed": int,
+    "count": int, "engine": "playlistgen"}``.
+
+    Raises :class:`RotationError` with a clear message (including install
+    instructions) when playlistgen is missing or fails.
+
+    ``runner`` is an optional callable ``(cmd_list) -> (returncode, stdout,
+    stderr)`` injected by tests to fake the subprocess.
+    """
+    if not library:
+        return {"trackIds": [], "daypart": daypart, "seed": seed or 0,
+                "count": 0, "engine": "playlistgen"}
+
+    executable = find_playlistgen(venv_dir=venv_dir)
+    if executable is None and runner is None:
+        raise RotationError(
+            "playlistgen is not installed. Install the broadcast toolkit with: "
+            "pip install -e ../radio-tools  (from the studio directory) or "
+            "pip install -e .  (from the repo root)."
+        )
+
+    # Use the injected runner's executable path or the real one.
+    exe = executable or "playlistgen"
+
+    now = time.localtime()
+    if hour is None:
+        hour = now.tm_hour
+    if daypart is None:
+        daypart = DAYPART_NAME_MAP.get(daypart_for_hour(hour), None)
+    if seed is None:
+        seed = random.randint(0, 999999)
+
+    rotation = build_broadcast_rotation(categories)
+    broadcast_lib = build_broadcast_library(library, categories)
+
+    # Path -> studio track id lookup for mapping the result back.
+    path_to_id = {}
+    for track in library:
+        abs_path = os.path.abspath(track.get("path", ""))
+        path_to_id[abs_path] = track["id"]
+
+    tmp_dir = tempfile.mkdtemp(prefix="studio-rotation-")
+    lib_path = os.path.join(tmp_dir, "library.json")
+    rot_path = os.path.join(tmp_dir, "rotation.json")
+    out_path = os.path.join(tmp_dir, "playlist.m3u")
+
+    try:
+        with open(lib_path, "w", encoding="utf-8") as f:
+            json.dump(broadcast_lib, f, indent=2, ensure_ascii=False)
+        with open(rot_path, "w", encoding="utf-8") as f:
+            json.dump(rotation, f, indent=2, ensure_ascii=False)
+
+        cmd = [exe, "--library", lib_path, "--rotation", rot_path,
+               "--hour", str(hour), "--slot", slot, "--seed", str(seed)]
+        if daypart:
+            cmd += ["--daypart", daypart]
+        cmd += ["-o", out_path]
+
+        if runner is not None:
+            returncode, stdout, stderr = runner(cmd)
+        else:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+            )
+            returncode, stdout, stderr = proc.returncode, proc.stdout, proc.stderr
+
+        if returncode != 0:
+            msg = stderr.strip() or stdout.strip() or "unknown error"
+            raise RotationError(f"playlistgen failed: {msg}")
+
+        sidecar_path = os.path.splitext(out_path)[0] + ".json"
+        if not os.path.exists(sidecar_path):
+            raise RotationError("playlistgen did not produce a JSON sidecar.")
+
+        with open(sidecar_path, "r", encoding="utf-8") as f:
+            sidecar = json.load(f)
+
+        track_ids = []
+        unmatched = 0
+        for entry in sidecar.get("tracks", []):
+            abs_path = os.path.abspath(entry.get("path", ""))
+            tid = path_to_id.get(abs_path)
+            if tid:
+                track_ids.append(tid)
+            else:
+                unmatched += 1
+
+        result = {
+            "trackIds": track_ids,
+            "daypart": sidecar.get("daypart", daypart),
+            "seed": sidecar.get("seed", seed),
+            "count": len(track_ids),
+            "engine": "playlistgen",
+        }
+        if unmatched:
+            result["unmatched"] = unmatched
+        return result
+    finally:
+        # Clean up the temp directory.
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -692,9 +955,13 @@ class Store:
             if isinstance(item, str):
                 item = {"trackId": item}
             if isinstance(item, dict) and item.get("trackId"):
-                clean.append({"uid": item.get("uid") or uuid.uuid4().hex[:10],
-                              "trackId": item["trackId"],
-                              "auto": bool(item.get("auto"))})
+                entry = {"uid": item.get("uid") or uuid.uuid4().hex[:10],
+                         "trackId": item["trackId"],
+                         "auto": bool(item.get("auto"))}
+                source = item.get("source")
+                if source:
+                    entry["source"] = str(source)
+                clean.append(entry)
         return clean
 
     def save_queue(self, items):
@@ -707,9 +974,13 @@ class Store:
             if isinstance(item, str):
                 item = {"trackId": item}
             if isinstance(item, dict) and item.get("trackId"):
-                clean.append({"uid": item.get("uid") or uuid.uuid4().hex[:10],
-                              "trackId": item["trackId"],
-                              "auto": bool(item.get("auto"))})
+                entry = {"uid": item.get("uid") or uuid.uuid4().hex[:10],
+                          "trackId": item["trackId"],
+                          "auto": bool(item.get("auto"))}
+                source = item.get("source")
+                if source:
+                    entry["source"] = str(source)
+                clean.append(entry)
         return clean
 
     # -- playlists ---------------------------------------------------------

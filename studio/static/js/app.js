@@ -741,8 +741,9 @@ function renderQueue() {
     `;
     row.querySelector('.q-title').textContent = track ? track.title : 'Missing track';
     const artistEl = row.querySelector('.q-artist');
+    const badge = item.source === 'playlistgen' ? ' · rotation' : item.source === 'fallback' ? ' · auto' : '';
     artistEl.textContent = track
-      ? (item.auto ? `${track.artist} · auto` : track.artist)
+      ? (item.auto ? `${track.artist} · auto${badge}` : track.artist)
       : 'the file is no longer in the library';
     if (item.auto) artistEl.classList.add('q-auto');
     fragment.appendChild(row);
@@ -863,11 +864,12 @@ function saveQueue() {
   });
 }
 
-function enqueue(trackIds, { auto = false, position = null } = {}) {
+function enqueue(trackIds, { auto = false, position = null, source = null } = {}) {
   const items = trackIds.map((id) => ({
     uid: Math.random().toString(36).slice(2, 12),
     trackId: id,
     auto,
+    source,
   }));
   if (position === null) state.queue.push(...items);
   else state.queue.splice(position, 0, ...items);
@@ -877,32 +879,43 @@ function enqueue(trackIds, { auto = false, position = null } = {}) {
   cueUpcoming();
 }
 
-/** Top the queue up from the rotation engine when Auto-DJ is on. */
+/**
+ * Top the queue up from the rotation engine when Auto-DJ is on.
+ *
+ * Calls /api/rotation/generate which drives the broadcast playlistgen engine
+ * (spins-per-hour, daypart weights, artist/category gaps).  When playlistgen is
+ * unavailable the backend falls back to the studio's built-in picker and sets
+ * `fallback: true`; the caller surfaces that as a toast so the operator knows.
+ */
 async function fillQueue(force = false) {
   if (!state.config.autoDj && !force) return;
   if (state.filling) return;
   const minimum = Number(state.config.autoDjMinQueue) || 3;
-  const shortfall = force ? Math.max(1, minimum - state.queue.length) : minimum - state.queue.length;
-  if (shortfall <= 0) return;
+  if (force) {
+    // "Fill now" always generates a fresh 30-min block regardless of the
+    // current queue length.
+  } else if (state.queue.length >= minimum) {
+    return;
+  }
 
   state.filling = true;
   try {
     const exclude = state.queue.map((i) => i.trackId);
     if (state.current) exclude.push(state.current.id);
-    const result = await api('/api/rotation/next', {
+    const result = await api('/api/rotation/generate', {
       method: 'POST',
-      body: { count: shortfall, excludeIds: exclude },
+      body: { excludeIds: exclude, slot: '30min' },
     });
-    if (!result.picks.length) {
+    const ids = result.trackIds || [];
+    if (!ids.length) {
       if (force) toast('The rotation found nothing to play — check that tracks have categories.', 'warn');
       return;
     }
-    enqueue(result.picks.map((p) => p.track.id), { auto: true });
-    const relaxed = result.picks.find((p) => p.relaxed);
-    if (relaxed && force) {
-      toast(relaxed.relaxed === 'uncategorised'
-        ? 'No categorised tracks yet, so Auto-DJ used the whole library.'
-        : `Rotation is tighter than the library allows — relaxed the ${relaxed.relaxed} rule.`, 'warn');
+    enqueue(ids, { auto: true, source: result.engine || 'playlistgen' });
+    if (result.fallback) {
+      toast(`playlistgen unavailable — used built-in rotation. ${result.warning || ''}`, 'warn');
+    } else if (force) {
+      toast(`Rotation generated ${ids.length} tracks (${result.daypart || '—'}).`);
     }
   } catch (err) {
     toast(`Auto-DJ failed: ${err.message}`, 'error');
