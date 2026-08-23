@@ -1,5 +1,0 @@
-mutagen>=1.45
-click>=8.0
-
-[dev]
-pytest>=7.0

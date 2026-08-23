@@ -6,3 +6,4 @@ music/
 *.log
 .DS_Store
 build/
+*.egg-info/
