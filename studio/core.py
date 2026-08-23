@@ -609,11 +609,11 @@ def build_broadcast_library(library, categories):
             "replaygain_track_gain": None,
         }
         # Preserve short-form audio kinds so the broadcast rotation engine can
-        # keep sweepers/jingles out of normal music blocks. Without this the
-        # studio bridge would hand playlistgen a library where these files are
-        # indistinguishable from songs.
+        # keep sweepers/jingles/liners out of normal music blocks. Without this
+        # the studio bridge would hand playlistgen a library where these files
+        # are indistinguishable from songs.
         kind = (track.get("kind") or "").strip().lower()
-        if kind in ("sweeper", "jingle"):
+        if kind in ("sweeper", "jingle", "liner"):
             item["kind"] = kind
         out.append(item)
     return out
