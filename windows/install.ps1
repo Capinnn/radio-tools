@@ -340,4 +340,21 @@ else {
     Write-Host "check-prereqs.ps1 not found next to installer; skipping final check." -ForegroundColor Yellow
 }
 
+# Full validation: engines resolvable, icecast share dirs found, config
+# renders. Run it and report PASS/FAIL per check. Non-zero means the stream
+# chain needs attention before first start.
+Write-Heading "Running engine validation"
+$validateScript = Join-Path $PSScriptRoot 'validate-windows.ps1'
+if (Test-Path $validateScript) {
+    & $validateScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`nValidation failed. Fix the FAIL lines above, then re-run:" -ForegroundColor Yellow
+        Write-Host "  .\windows\validate-windows.ps1" -ForegroundColor Yellow
+        Write-Host "  .venv\Scripts\radio paths --show   # see what was tried" -ForegroundColor Yellow
+    }
+}
+else {
+    Write-Host "validate-windows.ps1 not found next to installer; skipping validation." -ForegroundColor Yellow
+}
+
 exit 0
