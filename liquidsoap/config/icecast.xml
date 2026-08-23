@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Runtime placeholders are expanded by ../bin/start.sh. Keep credentials in
-  config/secrets.env or the process environment, never in this file.
+  Runtime placeholders are expanded by `radio start` (or the legacy
+  ../bin/start.sh). Keep credentials in config/secrets.env or the process
+  environment, never in this file.
+
+  The webroot/adminroot below are the Debian/Ubuntu locations. On Windows
+  `radio start` rewrites both tags in the rendered runtime copy to the share
+  directories inside the Icecast install; ICECAST_WEBROOT / ICECAST_ADMINROOT
+  override that on either platform. Run "radio paths" to see which values the
+  next start will use.
 -->
 <icecast>
   <location>Private station</location>

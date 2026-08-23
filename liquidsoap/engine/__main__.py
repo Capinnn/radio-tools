@@ -9,18 +9,20 @@ Only the standard library is used: ``subprocess``, ``os``, ``sys``, ``time``,
 
 Commands
 --------
-    radio start [--live] [--force-root]
-    radio stop [--force-root]
+    radio start [--live] [--force-root] [--dry-run]
+    radio stop [--force-root] [--dry-run]
     radio status
     radio restart [--live] [--force-root]
     radio smoke [--duration N] [--keep]
     radio gen-playlist [OPTIONS]
     radio bin-paths
+    radio paths [--show]
 """
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -31,8 +33,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
-from typing import Any
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from typing import Any, Callable, Iterable
 
 # ── paths ──────────────────────────────────────────────────────────────
 
@@ -148,11 +150,170 @@ def validate_secrets(config: dict[str, str]) -> None:
         raise EngineError("ICECAST_PORT is out of range")
 
 
-def render_config(config: dict[str, str]) -> str:
+# ── icecast web/admin roots ────────────────────────────────────────────
+#
+# The checked-in template carries Debian's Linux paths
+# (/usr/share/icecast2/{web,admin}).  The official Windows build ships those
+# trees inside the install root instead, and Icecast refuses to start when
+# webroot/adminroot do not exist.  The helpers below rewrite the two tags in
+# the *rendered* XML; the template on disk is never modified.
+
+
+def _xml_tag_value(xml: str, tag: str) -> str | None:
+    """Return the text content of the first ``<tag>...</tag>`` in *xml*."""
+    match = re.search(rf"<{tag}>(.*?)</{tag}>", xml, flags=re.DOTALL)
+    return match.group(1) if match else None
+
+
+def _xml_escape(value: str) -> str:
+    """Escape the three characters that matter inside an XML text node."""
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _set_xml_tag(xml: str, tag: str, value: str) -> str:
+    """Replace the text content of the first ``<tag>`` — everything else in
+    *xml* is left byte-identical."""
+    return re.sub(
+        rf"(<{tag}>)(.*?)(</{tag}>)",
+        lambda m: m.group(1) + _xml_escape(value) + m.group(3),
+        xml,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
+def _pure_path(value: str) -> PurePath:
+    """Parse *value* with the path flavour it is actually written in.
+
+    A Windows path keeps its meaning when this module is exercised on Linux
+    (``PurePath(r"C:\\x\\y").parent`` would otherwise collapse to ``.``),
+    which is what makes the Windows helpers unit-testable off Windows.
+    """
+    if IS_WINDOWS or re.match(r"^[A-Za-z]:[\\/]", value) or "\\" in value:
+        return PureWindowsPath(value)
+    return PurePath(value)
+
+
+def icecast_install_root(icecast_bin: str | None) -> PurePath | None:
+    """Derive the Icecast install root from the resolved binary path.
+
+    ``C:\\Program Files\\Icecast2 2.4.4\\bin\\icecast.exe`` →
+    ``C:\\Program Files\\Icecast2 2.4.4``.  Builds that drop ``icecast.exe``
+    directly in the install root resolve to that root.
+    """
+    if not icecast_bin:
+        return None
+    parent = _pure_path(icecast_bin).parent
+    if parent.name.lower() == "bin":
+        return parent.parent
+    return parent
+
+
+def find_icecast_share_dirs(
+    install_root: PurePath,
+    *,
+    exists: Callable[[PurePath], bool] | None = None,
+) -> tuple[PurePath | None, PurePath | None]:
+    """Locate the ``web`` and ``admin`` trees under an Icecast install root.
+
+    Official Windows layout is ``<root>\\share\\icecast\\{web,admin}``; some
+    builds place them directly at ``<root>\\{web,admin}``.  Each directory is
+    resolved independently, so a half-installed tree still yields what it has.
+    Returns ``(webroot, adminroot)``, either of which may be None.
+    """
+    check = exists if exists is not None else (lambda p: Path(p).exists())
+    bases = (install_root / "share" / "icecast", install_root)
+
+    def first(name: str) -> PurePath | None:
+        for base in bases:
+            candidate = base / name
+            if check(candidate):
+                return candidate
+        return None
+
+    return first("web"), first("admin")
+
+
+def icecast_paths_for(
+    install_root: str | None,
+    template_xml: str,
+    webroot_env: str | None = None,
+    adminroot_env: str | None = None,
+    *,
+    platform: str | None = None,
+    exists: Callable[[PurePath], bool] | None = None,
+    warn: Callable[[str], None] | None = None,
+) -> str:
+    """Return *template_xml* with ``<webroot>``/``<adminroot>`` made valid for
+    the running platform.
+
+    Precedence: ``ICECAST_WEBROOT`` / ``ICECAST_ADMINROOT`` (passed in as
+    *webroot_env* / *adminroot_env*) win outright.  Otherwise, on Windows the
+    share directories are looked up under *install_root*.  When neither yields
+    a path the template values are kept and a warning goes to stderr.
+
+    Pure apart from the injectable *exists* probe — safe to unit test against a
+    fake filesystem on any host.
+    """
+    plat = platform if platform is not None else os.name
+    emit = warn if warn is not None else (
+        lambda msg: print(f"radio: {msg}", file=sys.stderr)
+    )
+
+    webroot = webroot_env or None
+    adminroot = adminroot_env or None
+
+    if plat == "nt" and install_root and (webroot is None or adminroot is None):
+        found_web, found_admin = find_icecast_share_dirs(
+            _pure_path(install_root), exists=exists
+        )
+        if webroot is None and found_web is not None:
+            webroot = str(found_web)
+        if adminroot is None and found_admin is not None:
+            adminroot = str(found_admin)
+
+    if plat == "nt" and (webroot is None or adminroot is None):
+        emit("Icecast webroot not found; using template paths")
+
+    rendered = template_xml
+    if webroot:
+        rendered = _set_xml_tag(rendered, "webroot", webroot)
+    if adminroot:
+        rendered = _set_xml_tag(rendered, "adminroot", adminroot)
+    return rendered
+
+
+def effective_icecast_paths(
+    icecast_bin: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve the webroot/adminroot the next ``radio start`` would use.
+
+    Mirrors :func:`icecast_paths_for` but reports the two values instead of
+    rewriting XML, so ``radio paths --show`` and the start dry run agree.
+    """
+    if icecast_bin is None:
+        icecast_bin = resolve_icecast_bin()
+    template = CONFIG_TEMPLATE.read_text(encoding="utf-8")
+    root = icecast_install_root(icecast_bin)
+    rewritten = icecast_paths_for(
+        str(root) if root else None,
+        template,
+        os.environ.get("ICECAST_WEBROOT"),
+        os.environ.get("ICECAST_ADMINROOT"),
+        warn=lambda _msg: None,
+    )
+    return _xml_tag_value(rewritten, "webroot"), _xml_tag_value(
+        rewritten, "adminroot"
+    )
+
+
+def render_config(config: dict[str, str],
+                  icecast_bin: str | None = None) -> str:
     """Render icecast.xml runtime config from the template via string
     substitution (NOT envsubst).
 
-    Replaces ``${KEY}`` placeholders with values from *config*.
+    Replaces ``${KEY}`` placeholders with values from *config*, then fixes the
+    webroot/adminroot for the running platform (see :func:`icecast_paths_for`).
     """
     template = CONFIG_TEMPLATE.read_text(encoding="utf-8")
     substitutions = {
@@ -166,7 +327,14 @@ def render_config(config: dict[str, str]) -> str:
     rendered = template
     for key, value in substitutions.items():
         rendered = rendered.replace(f"${{{key}}}", value)
-    return rendered
+
+    root = icecast_install_root(icecast_bin)
+    return icecast_paths_for(
+        str(root) if root else None,
+        rendered,
+        os.environ.get("ICECAST_WEBROOT"),
+        os.environ.get("ICECAST_ADMINROOT"),
+    )
 
 
 # ── process management (cross-platform) ───────────────────────────────
@@ -332,46 +500,173 @@ def terminate_pid(pid: int, *, grace_seconds: float = 10.0) -> bool:
 # ── binary resolution ──────────────────────────────────────────────────
 
 
+ENV_BIN_VAR = {"icecast": "ICECAST_BIN", "liquidsoap": "LIQUIDSOAP_BIN"}
+
+# Executable basenames to look for, in preference order.
+_BIN_NAMES = {
+    ("icecast", "posix"): ("icecast2", "icecast"),
+    ("icecast", "nt"): ("icecast.exe", "icecast2.exe"),
+    ("liquidsoap", "posix"): ("liquidsoap",),
+    ("liquidsoap", "nt"): ("liquidsoap.exe",),
+}
+
+# Install-directory name patterns under %ProgramFiles%.  The exact directory
+# name varies between builds ("Icecast2 2.4.4", "Icecast 2.4.4", "Icecast2
+# Win32"), so match case-sensitively on both spellings and de-duplicate later.
+_DIR_PATTERNS = {
+    "icecast": ("Icecast*", "icecast*"),
+    "liquidsoap": ("Liquidsoap*", "liquidsoap*"),
+}
+
+
+def _list_subdirs(base: PurePath) -> list[str]:
+    """Return the names of *base*'s subdirectories (empty if unreadable)."""
+    try:
+        return sorted(entry.name for entry in os.scandir(str(base))
+                      if entry.is_dir())
+    except OSError:
+        return []
+
+
+def _dedupe(paths: Iterable[str]) -> list[str]:
+    """Drop repeats, case-insensitively, keeping first-seen order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in paths:
+        key = path.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(path)
+    return result
+
+
+def list_bin_candidates(
+    env: dict[str, str],
+    platform: str,
+    which: str,
+    *,
+    list_dir: Callable[[PurePath], list[str]] | None = None,
+) -> list[str]:
+    """Build the ordered candidate path list for *which* binary.
+
+    Pure: *env* is an injected environment mapping and directory listings go
+    through *list_dir* (defaults to a real scan of the filesystem).  Nothing
+    is probed for existence here — see :func:`resolve_bin`.
+
+    POSIX order is env var, then every PATH entry, then ``/usr/bin`` and
+    ``/usr/local/bin`` — identical to what the engine has always done.
+
+    Windows order is env var, PATH, ``%ProgramFiles%`` and
+    ``%ProgramFiles(x86)%`` install directories (exe directly in the directory
+    or under its ``bin\\`` subdirectory), ``%LOCALAPPDATA%\\Programs`` for
+    Liquidsoap, then fixed well-known paths.
+    """
+    plat = "nt" if platform in ("nt", "win32", "windows") else "posix"
+    names = _BIN_NAMES[(which, plat)]
+    # Parse paths with the target platform's flavour, not the host's, so the
+    # Windows branch is exercisable (and testable) from Linux.
+    flavour = PureWindowsPath if plat == "nt" else PurePosixPath
+    path_sep = ";" if plat == "nt" else ":"
+    candidates: list[str] = []
+
+    env_bin = env.get(ENV_BIN_VAR[which])
+    if env_bin:
+        candidates.append(env_bin)
+
+    # PATH scan — one full sweep per basename, matching shutil.which order.
+    path_dirs = [p for p in env.get("PATH", "").split(path_sep) if p]
+    for name in names:
+        for directory in path_dirs:
+            candidates.append(str(flavour(directory) / name))
+
+    if plat == "posix":
+        for directory in ("/usr/bin", "/usr/local/bin"):
+            for name in names:
+                candidates.append(str(flavour(directory) / name))
+        return _dedupe(candidates)
+
+    lister = list_dir if list_dir is not None else _list_subdirs
+
+    def add_installs(base: PurePath, patterns: tuple[str, ...]) -> None:
+        """Add <base>/<match>/<exe> and <base>/<match>/bin/<exe>."""
+        matches: list[str] = []
+        for entry in lister(base):
+            if any(fnmatch.fnmatchcase(entry, pat) for pat in patterns):
+                matches.append(entry)
+        for entry in _dedupe(matches):
+            install = base / entry
+            for name in names:
+                candidates.append(str(install / "bin" / name))
+                candidates.append(str(install / name))
+
+    program_files = env.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = env.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    for base in (program_files, program_files_x86):
+        if base:
+            add_installs(flavour(base), _DIR_PATTERNS[which])
+
+    if which == "liquidsoap":
+        local_appdata = env.get("LOCALAPPDATA", "")
+        if local_appdata:
+            programs = flavour(local_appdata) / "Programs"
+            add_installs(programs, _DIR_PATTERNS[which])
+            for name in names:
+                candidates.append(str(programs / "liquidsoap" / name))
+                # Pre-0.x installers dropped it straight in %LOCALAPPDATA%.
+                candidates.append(
+                    str(flavour(local_appdata) / "liquidsoap" / name)
+                )
+        candidates.append(r"C:\Program Files\Liquidsoap\liquidsoap.exe")
+        candidates.append(
+            r"C:\Program Files (x86)\Liquidsoap\liquidsoap.exe"
+        )
+    else:
+        candidates.append(r"C:\Program Files\Icecast2\bin\icecast.exe")
+        candidates.append(
+            r"C:\Program Files (x86)\Icecast2\bin\icecast.exe"
+        )
+
+    return _dedupe(candidates)
+
+
+def resolve_bin(
+    which: str,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+    *,
+    exists: Callable[[PurePath], bool] | None = None,
+    list_dir: Callable[[PurePath], list[str]] | None = None,
+) -> tuple[PurePath | None, list[str]]:
+    """Resolve *which* binary to the first candidate that exists.
+
+    Returns ``(found, tried)`` so callers can report the whole search path on
+    failure.  An explicit ``ICECAST_BIN`` / ``LIQUIDSOAP_BIN`` is honoured
+    as-is without an existence probe, so a deliberate override always wins
+    (and fails loudly at spawn time rather than being silently ignored).
+    """
+    environ = env if env is not None else dict(os.environ)
+    plat = platform if platform is not None else os.name
+    check = exists if exists is not None else (lambda p: Path(p).exists())
+
+    env_bin = environ.get(ENV_BIN_VAR[which])
+    if env_bin:
+        return _pure_path(env_bin), [env_bin]
+
+    tried = list_bin_candidates(environ, plat, which, list_dir=list_dir)
+    for candidate in tried:
+        path = _pure_path(candidate)
+        if check(path):
+            return path, tried
+    return None, tried
+
+
 def resolve_icecast_bin() -> str | None:
     """Resolve the Icecast binary path.
 
     Precedence: env ICECAST_BIN > PATH lookup > platform defaults.
     """
-    env_bin = os.environ.get("ICECAST_BIN")
-    if env_bin:
-        return env_bin
-
-    # PATH lookup
-    which = shutil.which("icecast2") or shutil.which("icecast")
-    if which:
-        return which
-
-    # Platform defaults
-    if IS_POSIX:
-        for candidate in ("/usr/bin/icecast2", "/usr/bin/icecast"):
-            if Path(candidate).exists():
-                return candidate
-    else:
-        # Windows: %ProgramFiles%/Icecast2 2.4.4/bin/icecast.exe etc.
-        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-        program_files_x86 = os.environ.get("ProgramFiles(x86)",
-                                           r"C:\Program Files (x86)")
-        search_bases = [program_files, program_files_x86]
-        for base in search_bases:
-            base_path = Path(base)
-            if not base_path.exists():
-                continue
-            # Match Icecast*/bin/icecast.exe
-            for icecast_dir in sorted(base_path.glob("Icecast*")):
-                exe = icecast_dir / "bin" / "icecast.exe"
-                if exe.exists():
-                    return str(exe)
-                # Some builds put icecast.exe at the top level
-                exe = icecast_dir / "icecast.exe"
-                if exe.exists():
-                    return str(exe)
-
-    return None
+    found, _tried = resolve_bin("icecast")
+    return str(found) if found else None
 
 
 def resolve_liquidsoap_bin() -> str | None:
@@ -379,34 +674,8 @@ def resolve_liquidsoap_bin() -> str | None:
 
     Precedence: env LIQUIDSOAP_BIN > PATH lookup > platform defaults.
     """
-    env_bin = os.environ.get("LIQUIDSOAP_BIN")
-    if env_bin:
-        return env_bin
-
-    # PATH lookup
-    which = shutil.which("liquidsoap")
-    if which:
-        return which
-
-    # Platform defaults
-    if IS_POSIX:
-        for candidate in ("/usr/bin/liquidsoap", "/usr/local/bin/liquidsoap"):
-            if Path(candidate).exists():
-                return candidate
-    else:
-        # Windows: liquidsoap.exe on PATH (covered by which above), or
-        # common install locations.
-        local_appdata = os.environ.get("LOCALAPPDATA", "")
-        if local_appdata:
-            candidate = Path(local_appdata) / "liquidsoap" / "liquidsoap.exe"
-            if candidate.exists():
-                return str(candidate)
-        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
-        candidate = Path(program_files) / "liquidsoap" / "liquidsoap.exe"
-        if candidate.exists():
-            return str(candidate)
-
-    return None
+    found, _tried = resolve_bin("liquidsoap")
+    return str(found) if found else None
 
 
 # ── HTTP helpers (urllib, not curl) ────────────────────────────────────
@@ -552,23 +821,81 @@ def spawn_process(args: list[str], log_file: Path, env: dict[str, str]) -> int:
     return proc.pid
 
 
-def do_start(mode: str = "station", force_root: bool = False) -> dict[str, int]:
+def _require_bins() -> tuple[str, str]:
+    """Resolve both binaries or fail with the list of paths tried."""
+    resolved: dict[str, str] = {}
+    for which, env_var in (("icecast", "ICECAST_BIN"),
+                           ("liquidsoap", "LIQUIDSOAP_BIN")):
+        found, tried = resolve_bin(which)
+        if not found:
+            listing = "\n  ".join(tried) if tried else "(no candidates)"
+            raise EngineError(
+                f"{which} executable not found (set {env_var}); tried:\n"
+                f"  {listing}"
+            )
+        resolved[which] = str(found)
+    return resolved["icecast"], resolved["liquidsoap"]
+
+
+def do_start_dry_run(mode: str = "station",
+                     force_root: bool = False) -> int:
+    """Validate everything ``radio start`` needs without spawning anything.
+
+    Resolves both binaries, checks the Liquidsoap script exists, loads and
+    validates the secrets, and renders the runtime config in memory (including
+    the platform webroot/adminroot rewrite).  Nothing is written, no process
+    is started.  Returns 0; raises EngineError on any problem.
+    """
+    check_root(force_root)
+
+    icecast_bin, liquidsoap_bin = _require_bins()
+
+    script = SCRIPTS_DIR / f"{mode}.liq"
+    if not script.exists():
+        raise EngineError(f"Liquidsoap script not found: {script}")
+
+    config = load_secrets()
+    validate_secrets(config)
+    rendered = render_config(config, icecast_bin)
+
+    port = config["ICECAST_PORT"]
+    host = config.get("ICECAST_HOST", "127.0.0.1")
+
+    print(
+        f"DRY RUN: would start icecast at {icecast_bin} "
+        f"liquidsoap {liquidsoap_bin}"
+    )
+    print(f"  mode:       {mode} ({script})")
+    print(f"  config:     {RUNTIME_CONFIG} (rendered, {len(rendered)} bytes)")
+    print(f"  webroot:    {_xml_tag_value(rendered, 'webroot')}")
+    print(f"  adminroot:  {_xml_tag_value(rendered, 'adminroot')}")
+    print(f"  stream:     http://{host}:{port}/radio.mp3")
+
+    for label, pid_file in (("Icecast", ICECAST_PID_FILE),
+                            ("Liquidsoap", LIQUIDSOAP_PID_FILE)):
+        pid = read_pid_file(pid_file)
+        if pid is not None and is_process_alive(pid):
+            print(f"  note:       {label} is already running (PID {pid})")
+
+    return 0
+
+
+def do_start(mode: str = "station", force_root: bool = False,
+             dry_run: bool = False) -> dict[str, int]:
     """Start Icecast and Liquidsoap.
 
     Returns a dict with 'icecast' and 'liquidsoap' PIDs.
-    Mirrors start.sh exactly.
+    Mirrors start.sh exactly.  With *dry_run* nothing is started and an empty
+    dict is returned.
     """
+    if dry_run:
+        do_start_dry_run(mode=mode, force_root=force_root)
+        return {}
+
     check_root(force_root)
     ensure_dirs()
 
-    icecast_bin = resolve_icecast_bin()
-    if not icecast_bin:
-        raise EngineError("icecast executable not found (set ICECAST_BIN)")
-    liquidsoap_bin = resolve_liquidsoap_bin()
-    if not liquidsoap_bin:
-        raise EngineError(
-            "liquidsoap executable not found (set LIQUIDSOAP_BIN)"
-        )
+    icecast_bin, liquidsoap_bin = _require_bins()
 
     check_already_running()
 
@@ -577,7 +904,7 @@ def do_start(mode: str = "station", force_root: bool = False) -> dict[str, int]:
     validate_secrets(config)
 
     # Render runtime config.
-    rendered = render_config(config)
+    rendered = render_config(config, icecast_bin)
     RUNTIME_CONFIG.write_text(rendered, encoding="utf-8")
     if IS_POSIX:
         try:
@@ -682,12 +1009,29 @@ def do_start(mode: str = "station", force_root: bool = False) -> dict[str, int]:
     return {"icecast": icecast_pid, "liquidsoap": liquidsoap_pid}
 
 
-def do_stop(force_root: bool = False) -> bool:
+def do_stop(force_root: bool = False, dry_run: bool = False) -> bool:
     """Stop Liquidsoap first, then Icecast.
 
-    Returns True if all components stopped cleanly.
+    Returns True if all components stopped cleanly.  With *dry_run* the PID
+    files are only inspected and reported — nothing is signalled or removed.
     """
     check_root(force_root)
+
+    if dry_run:
+        for label, pid_file in (("Liquidsoap", LIQUIDSOAP_PID_FILE),
+                                ("Icecast", ICECAST_PID_FILE)):
+            pid = read_pid_file(pid_file)
+            if pid is None:
+                print(f"DRY RUN: {label} is not running (no PID file).")
+            elif is_process_alive(pid):
+                print(f"DRY RUN: would stop {label} (PID {pid}).")
+            else:
+                print(
+                    f"DRY RUN: {label} PID file is stale (PID {pid}); "
+                    f"would remove {pid_file}."
+                )
+        print(f"DRY RUN: would remove {RUNTIME_CONFIG}; logs retained.")
+        return True
 
     components = [
         ("Liquidsoap", LIQUIDSOAP_PID_FILE, str(SCRIPTS_DIR) + "/"),
@@ -1168,10 +1512,23 @@ def do_gen_playlist(
 # ── bin-paths ──────────────────────────────────────────────────────────
 
 
-def do_bin_paths() -> int:
-    """Print resolved paths for liquidsoap and icecast binaries."""
-    icecast = resolve_icecast_bin()
-    liquidsoap = resolve_liquidsoap_bin()
+def _install_hint() -> None:
+    print("Set ICECAST_BIN / LIQUIDSOAP_BIN to override, or install:")
+    if IS_WINDOWS:
+        print("  Icecast:   https://icecast.org/download/")
+        print("  Liquidsoap: https://www.liquidsoap.info/download")
+    else:
+        print("  Debian/Ubuntu: sudo apt install icecast2 liquidsoap")
+
+
+def do_bin_paths(verbose: bool = False) -> int:
+    """Print resolved paths for liquidsoap and icecast binaries.
+
+    With *verbose*, also print every candidate path that was tried for a
+    binary that could not be found.
+    """
+    icecast, icecast_tried = resolve_bin("icecast")
+    liquidsoap, liquidsoap_tried = resolve_bin("liquidsoap")
 
     print(f"icecast:    {icecast or '(not found)'}")
     print(f"liquidsoap: {liquidsoap or '(not found)'}")
@@ -1179,14 +1536,63 @@ def do_bin_paths() -> int:
 
     if not icecast or not liquidsoap:
         print()
-        print("Set ICECAST_BIN / LIQUIDSOAP_BIN to override, or install:")
-        if IS_WINDOWS:
-            print("  Icecast:   https://icecast.org/download/")
-            print("  Liquidsoap: https://www.liquidsoap.info/download")
-        else:
-            print("  Debian/Ubuntu: sudo apt install icecast2 liquidsoap")
+        if verbose:
+            for label, found, tried in (
+                ("icecast", icecast, icecast_tried),
+                ("liquidsoap", liquidsoap, liquidsoap_tried),
+            ):
+                if found:
+                    continue
+                print(f"tried for {label}:")
+                for candidate in tried:
+                    print(f"  {candidate}")
+                print()
+        _install_hint()
         return 1
 
+    return 0
+
+
+def do_paths(show: bool = False) -> int:
+    """Print resolved binaries, Icecast share directories, and the platform.
+
+    The output is one ``key: value`` per line so scripts (notably
+    ``windows/validate-windows.ps1``) can grep it.  *show* is accepted for
+    symmetry with ``radio paths --show``; the listing is always printed.
+    """
+    icecast, icecast_tried = resolve_bin("icecast")
+    liquidsoap, liquidsoap_tried = resolve_bin("liquidsoap")
+    webroot, adminroot = effective_icecast_paths(
+        str(icecast) if icecast else None
+    )
+    root = icecast_install_root(str(icecast) if icecast else None)
+
+    print(f"platform: {'Windows' if IS_WINDOWS else 'POSIX'}")
+    print(f"icecast: {icecast or '(not found)'}")
+    print(f"liquidsoap: {liquidsoap or '(not found)'}")
+    print(f"icecast-root: {root or '(not found)'}")
+    print(f"icecast-webroot: {webroot or '(not found)'}")
+    print(f"icecast-adminroot: {adminroot or '(not found)'}")
+    print(f"config-template: {CONFIG_TEMPLATE}")
+    print(f"runtime-config: {RUNTIME_CONFIG}")
+    print(f"log-dir: {LOG_DIR}")
+
+    if show and (not icecast or not liquidsoap):
+        print()
+        for label, found, tried in (
+            ("icecast", icecast, icecast_tried),
+            ("liquidsoap", liquidsoap, liquidsoap_tried),
+        ):
+            if found:
+                continue
+            print(f"tried for {label}:")
+            for candidate in tried:
+                print(f"  {candidate}")
+            print()
+        _install_hint()
+
+    if not icecast or not liquidsoap:
+        return 1
     return 0
 
 
@@ -1210,11 +1616,17 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Use the live-assist script (PulseAudio/JACK).")
     p_start.add_argument("--force-root", action="store_true",
                          help="Allow running as root (POSIX only).")
+    p_start.add_argument("--dry-run", action="store_true",
+                         help="Validate binaries, secrets, and the rendered "
+                              "config without starting anything.")
 
     # stop
     p_stop = sub.add_parser("stop", help="Stop Liquidsoap and Icecast.")
     p_stop.add_argument("--force-root", action="store_true",
                         help="Allow running as root (POSIX only).")
+    p_stop.add_argument("--dry-run", action="store_true",
+                        help="Report what would be stopped without "
+                             "signalling anything.")
 
     # status
     sub.add_parser("status", help="Report component status and Icecast info.")
@@ -1262,7 +1674,17 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Print planned commands without writing.")
 
     # bin-paths
-    sub.add_parser("bin-paths", help="Print resolved binary paths.")
+    p_bin = sub.add_parser("bin-paths", help="Print resolved binary paths.")
+    p_bin.add_argument("--verbose", action="store_true",
+                       help="List every candidate path tried on failure.")
+
+    # paths
+    p_paths = sub.add_parser(
+        "paths",
+        help="Print binaries, Icecast web/admin dirs, and the platform.",
+    )
+    p_paths.add_argument("--show", action="store_true",
+                         help="Also list candidate paths tried on failure.")
 
     return parser
 
@@ -1275,11 +1697,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "start":
             mode = "live" if args.live else "station"
-            do_start(mode=mode, force_root=args.force_root)
+            do_start(mode=mode, force_root=args.force_root,
+                     dry_run=args.dry_run)
             return 0
 
         elif args.command == "stop":
-            do_stop(force_root=args.force_root)
+            do_stop(force_root=args.force_root, dry_run=args.dry_run)
             return 0
 
         elif args.command == "status":
@@ -1313,7 +1736,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         elif args.command == "bin-paths":
-            return do_bin_paths()
+            return do_bin_paths(verbose=args.verbose)
+
+        elif args.command == "paths":
+            return do_paths(show=args.show)
 
         else:
             parser.print_help()
