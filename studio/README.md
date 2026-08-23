@@ -6,6 +6,8 @@ flat JSON files, no database and no external assets.
 
 ## Run it
 
+### Linux / macOS
+
 ```bash
 cd studio
 python3 -m venv .venv
@@ -13,16 +15,29 @@ python3 -m venv .venv
 .venv/bin/python app.py --scan
 ```
 
+### Windows
+
+```cmd
+cd studio
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python app.py --scan
+```
+
+Or double-click `start.bat` (it activates the virtualenv and runs `python app.py`).
+
 Then open <http://127.0.0.1:5110>.
 
 `--scan` reads the music folder before starting; you can also press **Scan** in
 the app at any time. `--port` and `--host` override the defaults (5110 and
-127.0.0.1).
+127.0.0.1). Use `--restart` to stop any existing listener on the port and start
+a fresh instance.
 
 ## First run
 
 1. **Settings → Music folder** — an absolute path to your collection, e.g.
-   `/home/you/Music`. Subfolders are included. Leave it blank to use
+   `C:\Users\You\Music` on Windows or `/home/you/Music` on Linux. Subfolders are included. Leave it blank to use
    `studio/music/`.
 2. **Save & scan** — reads tags from every `.mp3`, `.flac`, `.m4a`, `.wav` and
    `.ogg` it finds.

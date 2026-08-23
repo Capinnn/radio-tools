@@ -8,7 +8,12 @@ needs it to seek), and exposes the JSON API over `core.Store`.
 import io
 import mimetypes
 import os
+import signal
+import socket
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 from flask import (Flask, Response, abort, jsonify, render_template, request,
                    send_file)
@@ -32,6 +37,125 @@ def _int_arg(name):
         return int(value) if value not in (None, "") else None
     except ValueError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform server restart helper
+# ---------------------------------------------------------------------------
+
+def _port_in_use(port, host="127.0.0.1"):
+    """Return True if something is listening on host:port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex((host, port)) == 0
+
+
+def restart_server(host, port, timeout=5, argv=None):
+    """Restart the studio server: terminate any listener on port, then
+    relaunch ``app.py`` in a new process and exit the current process.
+
+    Uses psutil when available; otherwise falls back to platform-aware
+    process lookup/termination (taskkill on Windows, lsof + SIGTERM on
+    POSIX).
+    """
+    argv = argv or sys.argv
+    own_pid = os.getpid()
+
+    try:
+        import psutil
+    except Exception:  # pragma: no cover - optional dependency
+        psutil = None
+
+    target_pids = set()
+
+    if psutil is not None:
+        try:
+            for conn in psutil.net_connections(kind="inet"):
+                if getattr(conn.laddr, "port", None) == port:
+                    pid = getattr(conn, "pid", None)
+                    if pid and pid != own_pid:
+                        target_pids.add(pid)
+        except Exception:
+            pass
+    else:
+        # Platform-aware fallback.
+        if sys.platform == "win32":
+            try:
+                proc = subprocess.run(
+                    ["netstat", "-ano"], capture_output=True, text=True, timeout=10
+                )
+                for line in proc.stdout.splitlines():
+                    if f":{port}" not in line:
+                        continue
+                    parts = line.strip().split()
+                    if parts and parts[-1].isdigit():
+                        pid = int(parts[-1])
+                        if pid != own_pid:
+                            target_pids.add(pid)
+            except Exception:
+                pass
+            for pid in target_pids:
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+        else:
+            try:
+                proc = subprocess.run(
+                    ["lsof", "-ti", f":{port}"],
+                    capture_output=True, text=True, timeout=10
+                )
+                for pid_str in proc.stdout.split():
+                    try:
+                        pid = int(pid_str)
+                        if pid != own_pid:
+                            target_pids.add(pid)
+                    except ValueError:
+                        pass
+            except Exception:
+                pass
+
+    # Terminate surviving PIDs (skipped on Windows where taskkill already ran).
+    for pid in target_pids:
+        if pid == own_pid:
+            continue
+        try:
+            if psutil is not None:
+                psutil.Process(pid).terminate()
+            elif sys.platform != "win32":
+                os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    # Wait until the port is free (or the timeout expires).
+    deadline = time.time() + timeout
+    while _port_in_use(port, host) and time.time() < deadline:
+        time.sleep(0.2)
+
+    # Relaunch without --restart to avoid an infinite loop.
+    script_path = Path(__file__).resolve()
+    new_argv = [sys.executable, str(script_path)]
+    skip_next = False
+    for arg in argv[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--restart":
+            continue
+        if arg.startswith("--restart") and "=" in arg:
+            continue
+        new_argv.append(arg)
+
+    if sys.platform == "win32":
+        subprocess.Popen(
+            new_argv,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+    else:
+        subprocess.Popen(new_argv, start_new_session=True, close_fds=True)
+
+    sys.exit(0)
 
 
 @app.get("/")
@@ -406,7 +530,12 @@ def main():
     parser.add_argument("--host", default=os.environ.get("STUDIO_HOST", "127.0.0.1"))
     parser.add_argument("--scan", action="store_true",
                         help="scan the music folder before starting")
+    parser.add_argument("--restart", action="store_true",
+                        help="restart any existing instance on this port first")
     args = parser.parse_args()
+
+    if args.restart:
+        restart_server(args.host, args.port)
 
     if args.scan:
         print("  scanning {} ...".format(store.music_dir()))

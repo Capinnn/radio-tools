@@ -1,5 +1,6 @@
 Flask>=3.0
 mutagen>=1.47
+psutil>=5.9
 
 # tests
 pytest>=8.0

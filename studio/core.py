@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import mutagen
 
@@ -141,7 +142,7 @@ def track_id_for_path(path):
     Deriving it from the path (rather than a random uuid) means a rescan does
     not orphan the ids sitting in playlists, the queue or the schedule.
     """
-    return hashlib.sha1(os.path.abspath(path).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(str(Path(path).resolve()).encode("utf-8")).hexdigest()[:12]
 
 
 def _first(value):
@@ -184,7 +185,7 @@ def read_tags(path):
 
     if not info["title"]:
         # "Artist - Title.mp3" is the common untagged case; split it when we can.
-        stem = os.path.splitext(os.path.basename(path))[0]
+        stem = Path(path).stem
         if " - " in stem and not info["artist"]:
             left, right = stem.split(" - ", 1)
             info["artist"], info["title"] = left.strip(), right.strip()
@@ -199,7 +200,7 @@ def read_tags(path):
 
 def read_art(path):
     """Return (bytes, mimetype) for embedded cover art, or None."""
-    ext = os.path.splitext(path)[1].lower()
+    ext = Path(path).suffix.lower()
     try:
         if ext == ".mp3":
             from mutagen.id3 import ID3
@@ -614,18 +615,30 @@ def find_playlistgen(venv_dir=None):
     """Return the path to the playlistgen executable, or None if unavailable.
 
     Looks for ../.venv/bin/playlistgen relative to the studio directory, then
-    falls back to a PATH lookup.  The caller can override the venv directory.
+    falls back to a PATH lookup.  Works on both POSIX venvs (bin/) and Windows
+    venvs (Scripts/playlistgen.exe).
     """
     candidates = []
+
+    def _add_venv(dir_path):
+        if not dir_path:
+            return
+        base = Path(dir_path)
+        candidates.extend([
+            base / "bin" / "playlistgen",
+            base / "Scripts" / "playlistgen.exe",
+            base / "Scripts" / "playlistgen",
+        ])
+
     if venv_dir:
-        candidates.append(os.path.join(venv_dir, "bin", "playlistgen"))
+        _add_venv(venv_dir)
     # ../.venv relative to the studio directory (core.py lives in studio/).
-    studio_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_venv = os.path.join(os.path.dirname(studio_dir), ".venv")
-    candidates.append(os.path.join(repo_venv, "bin", "playlistgen"))
+    studio_dir = Path(__file__).resolve().parent
+    _add_venv(studio_dir.parent / ".venv")
+
     for path in candidates:
-        if os.path.isfile(path) and os.access(path, os.X_OK):
-            return path
+        if path.is_file() and os.access(str(path), os.X_OK):
+            return str(path)
     # Last resort: rely on PATH.
     from shutil import which
     return which("playlistgen")
@@ -679,13 +692,13 @@ def generate_rotation(library, categories, hour=None, daypart=None,
     # Path -> studio track id lookup for mapping the result back.
     path_to_id = {}
     for track in library:
-        abs_path = os.path.abspath(track.get("path", ""))
+        abs_path = str(Path(track.get("path", "")).resolve())
         path_to_id[abs_path] = track["id"]
 
-    tmp_dir = tempfile.mkdtemp(prefix="studio-rotation-")
-    lib_path = os.path.join(tmp_dir, "library.json")
-    rot_path = os.path.join(tmp_dir, "rotation.json")
-    out_path = os.path.join(tmp_dir, "playlist.m3u")
+    tmp_dir = Path(tempfile.mkdtemp(prefix="studio-rotation-"))
+    lib_path = tmp_dir / "library.json"
+    rot_path = tmp_dir / "rotation.json"
+    out_path = tmp_dir / "playlist.m3u"
 
     try:
         with open(lib_path, "w", encoding="utf-8") as f:
@@ -693,11 +706,11 @@ def generate_rotation(library, categories, hour=None, daypart=None,
         with open(rot_path, "w", encoding="utf-8") as f:
             json.dump(rotation, f, indent=2, ensure_ascii=False)
 
-        cmd = [exe, "--library", lib_path, "--rotation", rot_path,
+        cmd = [exe, "--library", str(lib_path), "--rotation", str(rot_path),
                "--hour", str(hour), "--slot", slot, "--seed", str(seed)]
         if daypart:
             cmd += ["--daypart", daypart]
-        cmd += ["-o", out_path]
+        cmd += ["-o", str(out_path)]
 
         if runner is not None:
             returncode, stdout, stderr = runner(cmd)
@@ -711,8 +724,8 @@ def generate_rotation(library, categories, hour=None, daypart=None,
             msg = stderr.strip() or stdout.strip() or "unknown error"
             raise RotationError(f"playlistgen failed: {msg}")
 
-        sidecar_path = os.path.splitext(out_path)[0] + ".json"
-        if not os.path.exists(sidecar_path):
+        sidecar_path = out_path.with_suffix(".json")
+        if not sidecar_path.exists():
             raise RotationError("playlistgen did not produce a JSON sidecar.")
 
         with open(sidecar_path, "r", encoding="utf-8") as f:
@@ -721,7 +734,7 @@ def generate_rotation(library, categories, hour=None, daypart=None,
         track_ids = []
         unmatched = 0
         for entry in sidecar.get("tracks", []):
-            abs_path = os.path.abspath(entry.get("path", ""))
+            abs_path = str(Path(entry.get("path", "")).resolve())
             tid = path_to_id.get(abs_path)
             if tid:
                 track_ids.append(tid)
@@ -741,7 +754,7 @@ def generate_rotation(library, categories, hour=None, daypart=None,
     finally:
         # Clean up the temp directory.
         import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -752,21 +765,22 @@ class Store:
     """All persistent state: flat JSON files in one directory."""
 
     def __init__(self, base_dir, data_dir=None, music_dir=None):
-        self.base_dir = os.path.abspath(base_dir)
-        self.data_dir = os.path.abspath(data_dir or os.path.join(self.base_dir, "data"))
-        self._default_music = os.path.abspath(
-            music_dir or os.path.join(self.base_dir, "music"))
+        self.base_dir = str(Path(base_dir).resolve())
+        self.data_dir = str(Path(data_dir or Path(base_dir) / "data").resolve())
+        self._default_music = str(Path(
+            music_dir or Path(base_dir) / "music").resolve())
         self._lock = threading.RLock()
-        os.makedirs(self.data_dir, exist_ok=True)
-        os.makedirs(self._default_music, exist_ok=True)
+        Path(self.data_dir).mkdir(parents=True, exist_ok=True)
+        Path(self._default_music).mkdir(parents=True, exist_ok=True)
 
     def path(self, name):
-        return os.path.join(self.data_dir, name + ".json")
+        return str(Path(self.data_dir) / (name + ".json"))
 
     def read(self, name, default):
         with self._lock:
             target = self.path(name)
-            if not os.path.exists(target):
+            target_path = Path(target)
+            if not target_path.exists():
                 return json.loads(json.dumps(default))
             try:
                 with open(target, "r", encoding="utf-8") as handle:
@@ -813,7 +827,7 @@ class Store:
 
     def music_dir(self):
         configured = (self.config().get("musicDir") or "").strip()
-        return os.path.abspath(os.path.expanduser(configured)) if configured \
+        return str(Path(configured).expanduser().resolve()) if configured \
             else self._default_music
 
     # -- library -----------------------------------------------------------
@@ -838,54 +852,58 @@ class Store:
         preserved; only stream properties are refreshed unless the file's
         mtime changed.
         """
-        root = self.music_dir()
+        root = Path(self.music_dir())
         with self._lock:
             library = self.library()
             by_id = {t["id"]: t for t in library}
             seen = set()
             added, updated = 0, 0
 
-            if os.path.isdir(root):
-                for dirpath, dirnames, filenames in os.walk(root):
-                    dirnames[:] = [d for d in sorted(dirnames) if not d.startswith(".")]
-                    for filename in sorted(filenames):
-                        if os.path.splitext(filename)[1].lower() not in AUDIO_EXTENSIONS:
-                            continue
-                        full = os.path.join(dirpath, filename)
-                        track_id = track_id_for_path(full)
-                        seen.add(track_id)
-                        try:
-                            stat = os.stat(full)
-                        except OSError:
-                            continue
-                        existing = by_id.get(track_id)
-                        if existing and existing.get("mtime") == stat.st_mtime:
-                            continue
-                        tags = read_tags(full)
-                        if existing:
-                            # A rescan after an on-disk edit should win, but a
-                            # field the user cleared in the app stays cleared.
-                            existing.update(tags)
-                            existing["size"] = stat.st_size
-                            existing["mtime"] = stat.st_mtime
-                            updated += 1
-                        else:
-                            entry = {
-                                "id": track_id,
-                                "path": full,
-                                "filename": filename,
-                                "format": os.path.splitext(filename)[1].lstrip(".").upper(),
-                                "size": stat.st_size,
-                                "mtime": stat.st_mtime,
-                                "added": time.time(),
-                                "category": "",
-                                "playCount": 0,
-                                "lastPlayed": 0,
-                                **tags,
-                            }
-                            library.append(entry)
-                            by_id[track_id] = entry
-                            added += 1
+            if root.is_dir():
+                for file_path in sorted(root.rglob("*")):
+                    if not file_path.is_file():
+                        continue
+                    # Skip files inside hidden directories.
+                    rel = file_path.relative_to(root)
+                    if any(part.startswith(".") for part in rel.parts[:-1]):
+                        continue
+                    if file_path.suffix.lower() not in AUDIO_EXTENSIONS:
+                        continue
+                    full = str(file_path.resolve())
+                    track_id = track_id_for_path(full)
+                    seen.add(track_id)
+                    try:
+                        stat = file_path.stat()
+                    except OSError:
+                        continue
+                    existing = by_id.get(track_id)
+                    if existing and existing.get("mtime") == stat.st_mtime:
+                        continue
+                    tags = read_tags(full)
+                    if existing:
+                        # A rescan after an on-disk edit should win, but a
+                        # field the user cleared in the app stays cleared.
+                        existing.update(tags)
+                        existing["size"] = stat.st_size
+                        existing["mtime"] = stat.st_mtime
+                        updated += 1
+                    else:
+                        entry = {
+                            "id": track_id,
+                            "path": full,
+                            "filename": file_path.name,
+                            "format": file_path.suffix.lstrip(".").upper(),
+                            "size": stat.st_size,
+                            "mtime": stat.st_mtime,
+                            "added": time.time(),
+                            "category": "",
+                            "playCount": 0,
+                            "lastPlayed": 0,
+                            **tags,
+                        }
+                        library.append(entry)
+                        by_id[track_id] = entry
+                        added += 1
 
             removed = 0
             if prune:
@@ -895,7 +913,7 @@ class Store:
             self.save_library(library)
 
         return {"added": added, "updated": updated, "removed": removed,
-                "total": len(library), "musicDir": root}
+                "total": len(library), "musicDir": str(root)}
 
     def update_track(self, track_id, fields):
         """Edit metadata in the index and, where possible, in the file itself."""
@@ -915,11 +933,12 @@ class Store:
             if "year" in clean:
                 tag_fields["date"] = clean["year"]
             written = False
-            if tag_fields and os.path.exists(track.get("path", "")):
-                written = write_tags(track["path"], tag_fields)
+            track_path = Path(track.get("path", ""))
+            if tag_fields and track_path.exists():
+                written = write_tags(str(track_path), tag_fields)
                 if written:
                     try:
-                        track["mtime"] = os.stat(track["path"]).st_mtime
+                        track["mtime"] = track_path.stat().st_mtime
                     except OSError:
                         pass
             self.save_library(library)
@@ -934,7 +953,7 @@ class Store:
             self.save_library([t for t in library if t["id"] != track_id])
             if delete_file:
                 try:
-                    os.remove(track["path"])
+                    Path(track["path"]).unlink(missing_ok=True)
                 except OSError:
                     pass
             self.save_queue([i for i in self.queue() if i.get("trackId") != track_id])

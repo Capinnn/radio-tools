@@ -46,6 +46,14 @@ python3 -m venv .venv
 The `studio` subproject keeps its own environment and requirements; see
 [`studio/README.md`](studio/README.md).
 
+## Windows
+
+`studio/` and `broadcast/` both run on Windows. Python 3.11+, a virtualenv,
+and the same `pip install -r requirements.txt` in `studio/` is all the console
+needs. The `liquidsoap/` streaming engine is maintained separately; on Windows
+the engine layer is the `radio` CLI (another agent). Studio audio playback is
+handled by the browser, so it works anywhere.
+
 ## Test
 
 Each component has its own test suite.
