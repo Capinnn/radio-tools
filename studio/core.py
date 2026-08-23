@@ -884,10 +884,6 @@ class Store:
                         stat = file_path.stat()
                     except OSError:
                         continue
-                    existing = by_id.get(track_id)
-                    if existing and existing.get("mtime") == stat.st_mtime:
-                        continue
-                    tags = read_tags(full)
                     # Recognise imaging subfolders under the music root.
                     # Files there get a kind metadata field and their category
                     # set to the subfolder name. Two layouts are supported:
@@ -928,6 +924,20 @@ class Store:
                         # (see broadcast/clock._EVENT_KIND_TO_TRACK_KIND).
                         inferred_kind = "id"
                         inferred_category = kind_folder
+                    existing = by_id.get(track_id)
+                    # Fast-path: a file whose mtime is unchanged and whose
+                    # stored kind already matches the inferred one needs no
+                    # refresh. An existing track must still be revisited when
+                    # its inferred kind differs — e.g. an id/sweeper/jingle
+                    # already scanned in as plain music before the imaging
+                    # folders were recognised — so the rescan promotes it.
+                    if (
+                        existing
+                        and existing.get("mtime") == stat.st_mtime
+                        and (not inferred_kind or existing.get("kind") == inferred_kind)
+                    ):
+                        continue
+                    tags = read_tags(full)
                     if existing:
                         # A rescan after an on-disk edit should win, but a
                         # field the user cleared in the app stays cleared.

@@ -212,6 +212,31 @@ def test_clock_legal_id_substitutes_id_file(store, music_dir):
     assert "ID" not in result
 
 
+def test_rescan_promotes_id_scanned_before_kind_support(store, music_dir):
+    """A file already indexed as plain music before the ids/ folder was
+    recognised must gain kind='id' on a later rescan even when its mtime is
+    unchanged (the mtime fast-path must not suppress the promotion)."""
+    from make_test_tracks import write_tone
+    ids = music_dir / "_imaging" / "ids"
+    ids.mkdir(parents=True)
+    write_tone(str(ids / "TOH_01.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    track = next(t for t in library if t["filename"] == "TOH_01.wav")
+    # Simulate a library indexed before imaging kinds existed: same file, same
+    # mtime, but no kind/category set. Mutate and save the SAME list so the
+    # cleared kind actually persists.
+    track["kind"] = ""
+    track["category"] = ""
+    store.save_library(library)
+    result = store.scan()
+    assert result["added"] == 0
+    assert result["updated"] == 1
+    promoted = next(t for t in store.library() if t["filename"] == "TOH_01.wav")
+    assert promoted["kind"] == "id"
+    assert promoted["category"] == "ids"
+
+
 def test_scan_music_files_have_no_kind(store):
     """Regular music files should not have a kind tag (or it is empty)."""
     store.scan()
