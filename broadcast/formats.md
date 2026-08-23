@@ -180,3 +180,84 @@ richer metadata.
   ]
 }
 ```
+
+---
+
+## 5. Station clock template
+
+`broadcast.clock` adds minute-level hour structure above the flat rotation
+engine. An `HourTemplate` has a `name` and an ordered list of `ClockSlot`
+objects. Each slot identifies its position with exactly one of
+`position_seconds` or a station-clock `position_label` (`:00`, `:14`, or
+`:14:30`).
+
+| ClockSlot field | Type | Description |
+|---|---|---|
+| `position_seconds` | int or null | Zero-based offset within the hour (`0`-`3599`). Mutually exclusive with `position_label`. |
+| `position_label` | string or null | Clock notation `:MM` or `:MM:SS`. Mutually exclusive with `position_seconds`. |
+| `kind` | string | `music` (also accepts `category`), `legal_id`, `sweeper`, `promo`, or another event kind. |
+| `source_category` | string or null | Required for music blocks. Uses the rotation/library category code. |
+| `weight_hint` | number | Block-local multiplier for the source category's spins-per-hour value. Default `1.0`. |
+| `allow_gap_from_previous` | bool | If true, explicitly reset artist/title history before this block. Default false, so separation crosses block boundaries. |
+| `name` | string or null | Optional event name; sweepers render as `SWEEPER:<name>`. |
+
+The built-in `DEFAULT_HOUR_TEMPLATE` uses the existing broadcast category
+codes (`A` = Power, `B` = Hot, `C` = Recurrent/light, `GOLD` = Gold):
+
+| Clock position | Kind | Source / marker |
+|---|---|---|
+| `:00` | legal ID | `ID` |
+| `:01`-`:13` | music | category `A` |
+| `:14` | sweeper | `SWEEPER:station` |
+| `:15`-`:29` | music | category `B` |
+| `:30` | station promo | `PROMO` |
+| `:31`-`:44` | music | category `C` |
+| `:45` | sweeper | `SWEEPER:station` |
+| `:46`-`:59` | music | category `GOLD` |
+
+`build_hour(template, rotation_engine, hour_of_day, seed)` returns the ordered
+music paths with event markers interleaved. Markers are scheduling metadata,
+not filesystem paths and not playable audio.
+
+In an M3U, events are clock comments and music remains standard extended-M3U
+content:
+
+```
+#EXTM3U
+#CLOCK :00 ID
+#EXTINF:234,Artist Name - Song Title
+/music/artist - title.mp3
+#CLOCK :14 SWEEPER:station
+```
+
+The JSON sidecar keeps `tracks` music-only for compatibility with the engine
+playlist loader. Clock order is recorded separately in `clock.items`:
+
+```json
+{
+  "tracks": [
+    { "position": 1, "path": "/music/artist - title.mp3", "category": "A" }
+  ],
+  "clock": {
+    "template": "Default station hour",
+    "items": [
+      { "position": 1, "type": "event", "marker": "ID", "scheduled_seconds": 0, "scheduled_label": ":00" },
+      { "position": 2, "type": "track", "path": "/music/artist - title.mp3", "source_category": "A", "scheduled_seconds": 60, "scheduled_label": ":01" }
+    ]
+  }
+}
+```
+
+Generate a clocked hour with:
+
+```
+playlistgen /music --rotation rotation.json --clock --hour 14 --seed 42 -o playlist.m3u
+```
+
+The radio engine exposes the same mode:
+
+```
+radio gen-playlist --source /music --rotation liquidsoap/config/rotation.json --clock --hour 14 --seed 42 --output liquidsoap/data/playlist.m3u
+```
+
+Without `--clock`, `playlistgen` keeps its existing flat-rotation behavior.
