@@ -629,6 +629,59 @@ function renderClock() {
   $('#daypartLabel').textContent = part ? part.name : '';
 }
 
+// ---------------------------------------------------------------------------
+// Clock View: a read-only hour-wheel that mirrors the current hour template.
+// Eight slots per hour: ID, music, SWEEPER, music, PROMO, music, SWEEPER,
+// music. Widths are proportional to slot length, colours come from the same
+// design tokens the rest of the console uses (cyan music, amber sweeper,
+// red id, green promo). The slot covering the current minute is highlighted
+// by a brighter inset border; updates fire from the existing 30 s tick.
+const CLOCK_VIEW_TEMPLATE = [
+  { start: 0,  end: 1,  kind: 'id',      label: 'ID' },
+  { start: 1,  end: 14, kind: 'music',   label: 'music' },
+  { start: 14, end: 15, kind: 'sweeper', label: 'sweeper' },
+  { start: 15, end: 30, kind: 'music',   label: 'music' },
+  { start: 30, end: 31, kind: 'promo',   label: 'promo' },
+  { start: 31, end: 45, kind: 'music',   label: 'music' },
+  { start: 45, end: 46, kind: 'sweeper', label: 'sweeper' },
+  { start: 46, end: 60, kind: 'music',   label: 'music' },
+];
+
+function clockViewPos(slot) {
+  // ":00" for single-minute slots, ":NN-MM" for blocks.
+  if (slot.end - slot.start === 1) {
+    return `:${String(slot.start).padStart(2, '0')}`;
+  }
+  return `:${String(slot.start).padStart(2, '0')}-${String(slot.end - 1).padStart(2, '0')}`;
+}
+
+function renderClockView() {
+  const track = $('#clockViewTrack');
+  if (!track) return;
+  if (!track.dataset.built) {
+    track.innerHTML = CLOCK_VIEW_TEMPLATE.map((slot) => {
+      const widthPct = ((slot.end - slot.start) / 60) * 100;
+      const pos = clockViewPos(slot);
+      return (
+        `<div class="clock-view-slot kind-${slot.kind}"` +
+        ` role="listitem" data-start="${slot.start}" data-end="${slot.end}"` +
+        ` style="flex: ${widthPct} 0 0;">` +
+        `<span class="slot-pos">${pos}</span>` +
+        `<span class="slot-kind">${slot.label}</span>` +
+        `</div>`
+      );
+    }).join('');
+    track.dataset.built = '1';
+  }
+  const minute = new Date().getMinutes();
+  const activeIdx = CLOCK_VIEW_TEMPLATE.findIndex(
+    (slot) => minute >= slot.start && minute < slot.end,
+  );
+  track.querySelectorAll('.clock-view-slot').forEach((el, idx) => {
+    el.classList.toggle('active', idx === activeIdx);
+  });
+}
+
 function renderProgress() {
   const deck = liveDeck();
   const duration = deck.el.duration;
@@ -1775,6 +1828,7 @@ async function boot() {
   renderPlaylists();
   renderNowPlaying();
   renderClock();
+  renderClockView();
   renderScheduleTargets();
 
   wireTransport();
@@ -1786,6 +1840,10 @@ async function boot() {
 
   setInterval(() => { renderClock(); checkSchedule(); }, 1000);
   setInterval(renderProgress, 500);
+  // Clock view's active slot only changes when the minute crosses a slot
+  // boundary, but updating once every 30 s keeps the highlight fresh without
+  // re-painting every tick.
+  setInterval(renderClockView, 30000);
 
   // The AudioContext can only start from a gesture; arm it on the first one.
   const arm = () => { ensureAudio(); window.removeEventListener('pointerdown', arm); };

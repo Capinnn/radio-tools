@@ -622,6 +622,113 @@ input[type="range"]:disabled { cursor: not-allowed; opacity: 0.45; }
 .air-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .air-btn:disabled:hover { background: var(--panel-2); color: var(--text-dim); border-color: var(--line); }
 
+/* --------------------------------------------------------------- clock */
+.clock-view {
+  flex: none;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.clock-view-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.clock-view-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.clock-view-caption {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+.clock-view-track {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.clock-view-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 2px 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #0b0d10;
+  border-right: 1px solid rgba(11, 13, 16, 0.4);
+  transition: filter var(--fast), box-shadow var(--fast), opacity var(--fast);
+  opacity: 0.78;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.clock-view-slot:last-child { border-right: none; }
+.clock-view-slot .slot-pos {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.clock-view-slot .slot-kind {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  line-height: 1;
+  opacity: 0.85;
+}
+.clock-view-slot.kind-music   { background: var(--cyan); }
+.clock-view-slot.kind-id      { background: var(--red); }
+.clock-view-slot.kind-sweeper { background: var(--amber); }
+.clock-view-slot.kind-promo   { background: var(--green); }
+.clock-view-slot.active {
+  opacity: 1;
+  filter: brightness(1.08);
+  box-shadow: inset 0 0 0 2px var(--text), 0 0 0 1px var(--bg);
+  z-index: 1;
+}
+.clock-view-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
+.clock-view-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.clock-view-legend-item::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.clock-view-legend-item.kind-music   { color: var(--cyan); }
+.clock-view-legend-item.kind-id      { color: var(--red); }
+.clock-view-legend-item.kind-sweeper { color: var(--amber); }
+.clock-view-legend-item.kind-promo   { color: var(--green); }
+
 .meter {
   flex: none;
   padding: 10px 12px;

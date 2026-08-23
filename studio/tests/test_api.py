@@ -428,3 +428,25 @@ def test_rotation_generate_empty_library(client, monkeypatch):
     # No tracks scanned yet, so the library is empty.
     assert payload["count"] == 0
     assert payload["trackIds"] == []
+
+
+def test_console_page_contains_clock_view_panel(client):
+    """The console exposes the read-only CLOCK hour-wheel panel."""
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'id="clockView"' in body
+    assert "CLOCK" in body
+    assert "hour structure, read only" in body
+    assert 'id="clockViewTrack"' in body
+
+
+def test_clock_view_slot_renderer_is_defined(client):
+    """The static JS ships the function that paints the hour template."""
+    response = client.get("/static/js/app.js")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    # Renderer name and the eight-slot template must both be in the bundle.
+    assert "renderClockView" in body
+    assert "CLOCK_VIEW_TEMPLATE" in body
+    assert "id" in body and "sweeper" in body and "promo" in body

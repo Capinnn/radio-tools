@@ -153,6 +153,20 @@
         <button class="air-btn fade-out" id="fadeOutBtn"><svg class="ic"><use href="#i-fade-down"></use></svg>FADE OUT<small>F</small></button>
       </div>
 
+      <section class="clock-view" id="clockView" aria-label="Hour clock template">
+        <header class="clock-view-head">
+          <span class="clock-view-title">CLOCK</span>
+          <span class="clock-view-caption">hour structure, read only</span>
+        </header>
+        <div class="clock-view-track" id="clockViewTrack" role="list"></div>
+        <div class="clock-view-legend">
+          <span class="clock-view-legend-item kind-music">music</span>
+          <span class="clock-view-legend-item kind-id">id</span>
+          <span class="clock-view-legend-item kind-sweeper">sweeper</span>
+          <span class="clock-view-legend-item kind-promo">promo</span>
+        </div>
+      </section>
+
       <div class="meter">
         <div class="meter-head"><span>Output</span><span id="meterPeak">-inf dB</span></div>
         <div class="meter-rows">
