@@ -5,3 +5,4 @@ __pycache__/
 music/
 *.log
 .DS_Store
+build/

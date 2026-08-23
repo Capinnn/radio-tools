@@ -27,7 +27,7 @@ radio = "engine.__main__:main"
 
 [tool.setuptools]
 packages = ["broadcast", "engine", "lib"]
-package-dir = {"broadcast" = ".", "engine" = "liquidsoap/engine", "lib" = "liquidsoap/lib"}
+package-dir = {"engine" = "liquidsoap/engine", "lib" = "liquidsoap/lib"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
