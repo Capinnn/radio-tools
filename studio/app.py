@@ -5,6 +5,7 @@ Serves the single-page console, streams audio with Range support (the browser
 needs it to seek), and exposes the JSON API over `core.Store`.
 """
 
+import gzip
 import io
 import mimetypes
 import os
@@ -13,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import zlib
 from pathlib import Path
 
 from flask import (Flask, Response, abort, jsonify, render_template, request,
@@ -23,12 +25,72 @@ import core
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 MAX_UPLOAD_MB = 512
+MIN_COMPRESS_BYTES = 500
+
+_COMPRESSIBLE_TYPES = frozenset((
+    "text/",
+    "application/json",
+    "application/javascript",
+    "application/rss+xml",
+    "application/xml",
+    "application/xhtml+xml",
+))
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 store = core.Store(BASE_DIR,
                    data_dir=os.environ.get("STUDIO_DATA_DIR"),
                    music_dir=os.environ.get("STUDIO_MUSIC_DIR"))
+
+
+@app.after_request
+def _compress_response(response):
+    """Compress text-like responses when the client accepts gzip or deflate."""
+    # Already encoded, no body, or not-modified: leave alone.
+    if response.status_code == 304:
+        return response
+    if response.headers.get("Content-Encoding"):
+        return response
+
+    # Skip SSE / streaming responses.
+    content_type = response.headers.get("Content-Type", "")
+    if "text/event-stream" in content_type:
+        return response
+
+    # Skip the embed-health endpoint: it relies on ETag-based conditional 304s.
+    if request.path == "/api/embed-health":
+        return response
+
+    # Force the response body into memory so we can compress static files
+    # served via send_file; in production this is already non-passthrough.
+    response.direct_passthrough = False
+    body = response.get_data()
+    if not body or len(body) < MIN_COMPRESS_BYTES:
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
+
+    accepted = request.headers.get("Accept-Encoding", "")
+    if not accepted:
+        return response
+
+    if "gzip" in accepted:
+        encoded = gzip.compress(body)
+        encoding = "gzip"
+    elif "deflate" in accepted:
+        encoded = zlib.compress(body)
+        encoding = "deflate"
+    else:
+        return response
+
+    if len(encoded) >= len(body):
+        response.headers["Vary"] = "Accept-Encoding"
+        return response
+
+    response.set_data(encoded)
+    response.headers["Content-Encoding"] = encoding
+    response.headers["Content-Length"] = str(len(encoded))
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 
 def _int_arg(name):

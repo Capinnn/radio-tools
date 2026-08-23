@@ -221,6 +221,25 @@ def test_unknown_api_route_returns_json_404(client):
     assert response.get_json()["error"] == "not found"
 
 
+# --------------------------------------------------------------- compression
+
+
+def test_static_js_is_gzipped_when_accepted(client):
+    response = client.get("/static/js/app.js", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 200
+    assert response.headers["Content-Encoding"] == "gzip"
+    assert response.headers["Vary"] == "Accept-Encoding"
+    assert len(response.get_data()) >= 500
+
+
+def test_small_response_is_not_gzipped(client):
+    # This endpoint returns a tiny JSON body, well under the 500-byte threshold.
+    response = client.delete("/api/playlists/ghost", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 404
+    assert "Content-Encoding" not in response.headers
+    assert response.headers["Vary"] == "Accept-Encoding"
+
+
 # --------------------------------------------------------------- rotation gen
 #
 # /api/rotation/generate drives the broadcast playlistgen engine.  The
