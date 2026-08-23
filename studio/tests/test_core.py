@@ -62,6 +62,39 @@ def test_scan_picks_up_subfolders(store, music_dir):
     assert store.scan()["total"] == 6
 
 
+def test_scan_tags_sweepers_subfolder(store, music_dir):
+    """Files under sweepers/ get kind='sweeper' and category='sweepers'."""
+    from make_test_tracks import write_tone
+    sweepers = music_dir / "sweepers"
+    sweepers.mkdir()
+    write_tone(str(sweepers / "station-id.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    sweeper = next(t for t in library if t["filename"] == "station-id.wav")
+    assert sweeper["kind"] == "sweeper"
+    assert sweeper["category"] == "sweepers"
+
+
+def test_scan_tags_jingles_subfolder(store, music_dir):
+    """Files under jingles/ get kind='jingle' and category='jingles'."""
+    from make_test_tracks import write_tone
+    jingles = music_dir / "jingles"
+    jingles.mkdir()
+    write_tone(str(jingles / "intro.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    jingle = next(t for t in library if t["filename"] == "intro.wav")
+    assert jingle["kind"] == "jingle"
+    assert jingle["category"] == "jingles"
+
+
+def test_scan_music_files_have_no_kind(store):
+    """Regular music files should not have a kind tag (or it is empty)."""
+    store.scan()
+    for track in store.library():
+        assert track.get("kind", "") == ""
+
+
 def test_edit_writes_tags_back_into_the_file(scanned):
     track = scanned.library()[0]
     updated, written = scanned.update_track(track["id"], {

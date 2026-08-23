@@ -196,6 +196,44 @@ def _seed_for_block(seed: int, hour_of_day: int, slot_index: int) -> int:
     return block_seed
 
 
+# Map clock event kinds to the library track ``kind`` tag they prefer.
+# When a slot is sweeper or promo, build_hour looks for a library track
+# tagged with the corresponding kind and uses its path instead of the
+# plain text marker. If none is available, the marker is kept.
+_EVENT_KIND_TO_TRACK_KIND = {
+    "sweeper": "sweeper",
+    "promo": "jingle",
+}
+
+
+def _pick_short_form_track(
+    engine: RotationEngine, slot: ClockSlot, seed: int, hour_of_day: int,
+    slot_index: int,
+) -> dict | None:
+    """Return a tagged short-form track for an event slot, or None.
+
+    Selection is deterministic for a given (seed, hour, slot_index): the
+    RNG is seeded from those values so the same inputs always pick the
+    same file.
+    """
+    event_kind = slot.event_kind
+    if event_kind is None:
+        return None
+    track_kind = _EVENT_KIND_TO_TRACK_KIND.get(event_kind)
+    if track_kind is None:
+        return None
+    candidates = [
+        track for track in engine.tracks
+        if str(track.get("kind") or "").lower() == track_kind
+    ]
+    if not candidates:
+        return None
+    rng = random.Random(f"clock-shortform:{int(seed)}:{hour_of_day}:{slot_index}")
+    return sorted(candidates, key=lambda t: t.get("path") or t.get("id") or "")[
+        rng.randrange(len(candidates))
+    ]
+
+
 def _block_rotation(engine: RotationEngine, slot: ClockSlot) -> dict:
     """Return a block-local rotation without mutating the caller's engine."""
     rotation = copy.deepcopy(engine.rotation)
@@ -244,14 +282,28 @@ def render_hour(
 
     for index, slot in enumerate(template.slots):
         if not slot.is_music:
-            rendered.append(
-                {
-                    "marker": slot.marker,
-                    "_clock_position_seconds": slot.offset_seconds,
-                    "_clock_position_label": slot.label,
-                    "_clock_kind": slot.event_kind,
-                }
+            # Try to substitute a tagged short-form audio file (sweeper or
+            # jingle) from the library for this event slot. If none is
+            # available, fall back to the text marker.
+            short_form = _pick_short_form_track(
+                rotation_engine, slot, seed, hour_of_day, index,
             )
+            if short_form is not None:
+                item = dict(short_form)
+                item["_clock_position_seconds"] = slot.offset_seconds
+                item["_clock_position_label"] = slot.label
+                item["_clock_kind"] = slot.event_kind
+                item["_clock_marker"] = slot.marker
+                rendered.append(item)
+            else:
+                rendered.append(
+                    {
+                        "marker": slot.marker,
+                        "_clock_position_seconds": slot.offset_seconds,
+                        "_clock_position_label": slot.label,
+                        "_clock_kind": slot.event_kind,
+                    }
+                )
             continue
 
         block_end = (

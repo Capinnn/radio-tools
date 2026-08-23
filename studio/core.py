@@ -880,12 +880,28 @@ class Store:
                     if existing and existing.get("mtime") == stat.st_mtime:
                         continue
                     tags = read_tags(full)
+                    # Recognise sweepers/ and jingles/ subfolders under the
+                    # music root. Files there get a kind metadata field and
+                    # their category set to the subfolder name.
+                    top_folder = rel.parts[0] if len(rel.parts) > 1 else ""
+                    inferred_kind = ""
+                    inferred_category = ""
+                    if top_folder.lower() == "sweepers":
+                        inferred_kind = "sweeper"
+                        inferred_category = top_folder
+                    elif top_folder.lower() == "jingles":
+                        inferred_kind = "jingle"
+                        inferred_category = top_folder
                     if existing:
                         # A rescan after an on-disk edit should win, but a
                         # field the user cleared in the app stays cleared.
                         existing.update(tags)
                         existing["size"] = stat.st_size
                         existing["mtime"] = stat.st_mtime
+                        if inferred_kind:
+                            existing["kind"] = inferred_kind
+                            if not existing.get("category"):
+                                existing["category"] = inferred_category
                         updated += 1
                     else:
                         entry = {
@@ -896,9 +912,10 @@ class Store:
                             "size": stat.st_size,
                             "mtime": stat.st_mtime,
                             "added": time.time(),
-                            "category": "",
+                            "category": inferred_category,
                             "playCount": 0,
                             "lastPlayed": 0,
+                            "kind": inferred_kind,
                             **tags,
                         }
                         library.append(entry)

@@ -240,3 +240,121 @@ def test_playlistgen_clock_cli_writes_markers_and_json(tmp_path):
     ]
     assert sidecar["clock"]["template"] == DEFAULT_HOUR_TEMPLATE.name
     assert len(sidecar["clock"]["items"]) == len(DEFAULT_HOUR_TEMPLATE.slots)
+
+
+# ── short-form sweeper/jingle substitution ─────────────────────────────
+
+
+def _track_with_kind(path: str, artist: str, category: str, duration: float,
+                     kind: str = "") -> dict:
+    """Like _track but adds a kind field for sweeper/jingle tagging."""
+    track = _track(path, artist, category, duration)
+    track["kind"] = kind
+    return track
+
+
+def test_sweeper_slot_uses_tagged_sweeper_file():
+    """A sweeper slot should use a kind=sweeper file from the library."""
+    template = HourTemplate(
+        "Sweeper substitution",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+            ClockSlot(position_label=":15", kind="music", source_category="B"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track("/music/b1.mp3", "Artist B", "B", 60),
+        _track_with_kind("/sweepers/station-id.mp3", "Station", "sweepers",
+                         10, kind="sweeper"),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    # The sweeper slot should be replaced with the file path, not a marker.
+    assert "/sweepers/station-id.mp3" in result
+    assert "SWEEPER:station" not in result
+
+
+def test_sweeper_slot_falls_back_to_marker_without_tagged_file():
+    """Without a kind=sweeper file, the marker should be kept."""
+    template = HourTemplate(
+        "Sweeper fallback",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    assert "SWEEPER:station" in result
+
+
+def test_promo_slot_uses_tagged_jingle_file():
+    """A promo slot should use a kind=jingle file from the library."""
+    template = HourTemplate(
+        "Promo substitution",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":30", kind="promo"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track_with_kind("/jingles/promo.mp3", "Station", "jingles", 15,
+                         kind="jingle"),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    assert "/jingles/promo.mp3" in result
+    assert "PROMO" not in result
+
+
+def test_sweeper_substitution_is_deterministic():
+    """Same seed produces the same sweeper file selection."""
+    template = HourTemplate(
+        "Deterministic sweeper",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track_with_kind("/sweepers/sweeper1.mp3", "S", "sweepers", 10,
+                         kind="sweeper"),
+        _track_with_kind("/sweepers/sweeper2.mp3", "S", "sweepers", 10,
+                         kind="sweeper"),
+    ]
+    first = build_hour(template, _engine(tracks), hour_of_day=9, seed=42)
+    second = build_hour(template, _engine(tracks), hour_of_day=9, seed=42)
+    assert first == second
+    # The selected sweeper should be one of the two available files
+    sweeper_entry = next(
+        item for item in first if "sweepers" in str(item)
+    )
+    assert sweeper_entry in ("/sweepers/sweeper1.mp3",
+                             "/sweepers/sweeper2.mp3")
+
+
+def test_legal_id_slot_not_substituted_by_sweeper():
+    """legal_id slots should not be substituted by sweeper files."""
+    template = HourTemplate(
+        "ID not substituted",
+        [
+            ClockSlot(position_label=":00", kind="legal_id"),
+            ClockSlot(position_label=":01", kind="music", source_category="A"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track_with_kind("/sweepers/station-id.mp3", "Station", "sweepers",
+                         10, kind="sweeper"),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    assert "ID" in result
+    assert "/sweepers/station-id.mp3" not in result

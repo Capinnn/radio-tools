@@ -13,6 +13,8 @@ Usage:
   trackcheck /music --fix              # fill empty tags, then report
   trackcheck /music --min 60 --max 600 # flag tracks <1min or >10min
   trackcheck /music --json report.json # write report as JSON
+  trackcheck /sweepers --kind sweep    # scan as short-form sweepers
+  trackcheck /jingles --kind jingle --force  # allow long jingles
 """
 
 from __future__ import annotations
@@ -204,10 +206,19 @@ def _fix_empty_tags(path: str, audio, stem: str) -> list[str]:
     return actions
 
 
-# ── scanner ─────────────────────────────────────────────────────────────
+# ── short-form audio limits ─────────────────────────────────────────────
+
+# When --kind is not "music", the scanner applies short-form duration limits.
+# Sweepers are typically short station IDs; jingles are short musical bumps.
+KIND_DURATION_LIMITS: dict[str, float] = {
+    "sweeper": 90.0,
+    "jingle": 90.0,
+}
+
 
 def scan_library(folder: str, min_duration: float = 0.0,
-                 max_duration: float = 0.0, fix: bool = False) -> dict:
+                 max_duration: float = 0.0, fix: bool = False,
+                 kind: str = "music", force: bool = False) -> dict:
     """Scan *folder* and return a report dict.
 
     Parameters:
@@ -215,8 +226,13 @@ def scan_library(folder: str, min_duration: float = 0.0,
       min_duration Flag tracks shorter than this (seconds). 0 = no check.
       max_duration Flag tracks longer than this (seconds). 0 = no check.
       fix          If True, fill empty tags from filename (non-destructive).
+      kind         Audio kind: "music" (default), "sweeper", or "jingle".
+                   When not "music", short-form duration limits apply and
+                   the report is tagged with the kind.
+      force        When True, short-form duration warnings are suppressed
+                   (the files are still scanned but not flagged as too_long).
 
-    Returns a dict with keys: issues, duplicates, stats, fixes.
+    Returns a dict with keys: issues, duplicates, stats, fixes, kind.
     """
     root = Path(folder)
     if not root.exists():
@@ -307,6 +323,16 @@ def scan_library(folder: str, min_duration: float = 0.0,
                 "detail": f"Duration {tags['duration']:.1f}s > {max_duration}s maximum",
             })
 
+        # Short-form audio duration limit (sweeper/jingle)
+        kind_limit = KIND_DURATION_LIMITS.get(kind)
+        if kind_limit and not force and tags["duration"] > kind_limit:
+            issues.append({
+                "file": fpath,
+                "issue": "too_long_for_kind",
+                "detail": f"Duration {tags['duration']:.1f}s > {kind_limit}s "
+                          f"limit for kind '{kind}' (use --force to allow)",
+            })
+
         # ReplayGain check
         if tags["replaygain_track_gain"] is None:
             issues.append({
@@ -358,6 +384,7 @@ def scan_library(folder: str, min_duration: float = 0.0,
             })
 
     return {
+        "kind": kind,
         "scanned": total_files,
         "total_duration": total_duration,
         "issues": issues,
@@ -382,7 +409,11 @@ def render_report(report: dict) -> str:
     stats = report["stats"]
 
     lines.append("=" * 60)
-    lines.append("TRACKCHECK REPORT")
+    kind = report.get("kind", "music")
+    title = "TRACKCHECK REPORT"
+    if kind != "music":
+        title += f" [{kind}]"
+    lines.append(title)
     lines.append("=" * 60)
     lines.append("")
     lines.append(f"Files scanned:     {stats['total_files']}")
@@ -405,6 +436,7 @@ def render_report(report: dict) -> str:
         "wrong_extension": "Wrong File Extension",
         "too_short": "Too Short",
         "too_long": "Too Long",
+        "too_long_for_kind": "Too Long For Kind",
         "missing_replaygain": "Missing ReplayGain",
         "tag_filename_conflict": "Tag/Filename Conflict",
         "corrupt": "Corrupt / Unreadable",
@@ -470,15 +502,27 @@ def render_report(report: dict) -> str:
               help="Write the full report as JSON to this path.")
 @click.option("--quiet", is_flag=True,
               help="Suppress the human-readable report (use with --json).")
-def cli(folder, fix, min_duration, max_duration, json_output, quiet):
+@click.option("--kind", type=click.Choice(["music", "sweep", "jingle"],
+              case_sensitive=False), default="music",
+              show_default=True,
+              help="Audio kind: music (default), sweep, or jingle. "
+                   "When not music, short-form duration limits apply.")
+@click.option("--force", is_flag=True,
+              help="With --kind sweep|jingle, allow files longer than the "
+                   "short-form limit (still scanned, not flagged).")
+def cli(folder, fix, min_duration, max_duration, json_output, quiet, kind, force):
     """Entry point for the trackcheck command."""
     if not Path(folder).exists():
         click.echo(f"Error: folder not found: {folder}", err=True)
         raise SystemExit(1)
 
+    # Normalise kind: "sweep" is the CLI alias for "sweeper"
+    kind_norm = "sweeper" if kind == "sweep" else kind
+
     try:
         report = scan_library(folder, min_duration=min_duration,
-                              max_duration=max_duration, fix=fix)
+                              max_duration=max_duration, fix=fix,
+                              kind=kind_norm, force=force)
     except Exception as exc:
         click.echo(f"Error scanning library: {exc}", err=True)
         raise SystemExit(1)

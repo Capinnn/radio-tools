@@ -168,3 +168,78 @@ class TestCLI:
         result = runner.invoke(cli, [str(music_library), "--fix"])
         # Should report fixes applied
         assert "Fixes applied" in result.output or "fixes" in result.output.lower()
+
+
+class TestKindFlag:
+    """Tests for --kind sweep|jingle|music short-form audio tagging."""
+
+    def _make_wav(self, path, duration_sec, sample_rate=8000):
+        import wave
+        n_frames = int(duration_sec * sample_rate)
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sample_rate)
+            w.writeframes(b"\x00\x00" * n_frames)
+
+    def test_kind_sweep_tags_report(self, tmp_path):
+        """scan_library with kind='sweeper' tags the report with that kind."""
+        self._make_wav(tmp_path / "sweeper1.wav", 5.0)
+        report = scan_library(str(tmp_path), kind="sweeper", force=True)
+        assert report["kind"] == "sweeper"
+
+    def test_kind_music_is_default(self, tmp_path):
+        """Default kind is music and does not appear in the report title."""
+        self._make_wav(tmp_path / "song.wav", 2.0)
+        report = scan_library(str(tmp_path))
+        assert report["kind"] == "music"
+
+    def test_kind_sweep_short_file_no_warning(self, tmp_path):
+        """A short sweeper (< 90s) should not trigger too_long_for_kind."""
+        self._make_wav(tmp_path / "short.wav", 5.0)
+        report = scan_library(str(tmp_path), kind="sweeper")
+        kind_issues = [i for i in report["issues"]
+                       if i["issue"] == "too_long_for_kind"]
+        assert len(kind_issues) == 0
+
+    def test_kind_sweep_long_file_warns(self, tmp_path):
+        """A sweeper > 90s should warn with too_long_for_kind."""
+        self._make_wav(tmp_path / "long.wav", 95.0)
+        report = scan_library(str(tmp_path), kind="sweeper")
+        kind_issues = [i for i in report["issues"]
+                       if i["issue"] == "too_long_for_kind"]
+        assert len(kind_issues) == 1
+        assert "90" in kind_issues[0]["detail"]
+
+    def test_kind_sweep_long_file_force_suppresses_warning(self, tmp_path):
+        """--force suppresses the too_long_for_kind warning."""
+        self._make_wav(tmp_path / "long.wav", 95.0)
+        report = scan_library(str(tmp_path), kind="sweeper", force=True)
+        kind_issues = [i for i in report["issues"]
+                       if i["issue"] == "too_long_for_kind"]
+        assert len(kind_issues) == 0
+
+    def test_kind_jingle_long_file_warns(self, tmp_path):
+        """A jingle > 90s should warn with too_long_for_kind."""
+        self._make_wav(tmp_path / "long.wav", 95.0)
+        report = scan_library(str(tmp_path), kind="jingle")
+        kind_issues = [i for i in report["issues"]
+                       if i["issue"] == "too_long_for_kind"]
+        assert len(kind_issues) == 1
+
+    def test_cli_kind_sweep_shows_kind_in_report(self, tmp_path):
+        """CLI --kind sweep shows [sweeper] in the report header."""
+        self._make_wav(tmp_path / "sweeper.wav", 5.0)
+        runner = CliRunner()
+        result = runner.invoke(cli, [str(tmp_path), "--kind", "sweep",
+                                     "--force"])
+        # Exit 1 because of missing tags etc., but report should render
+        assert "[sweeper]" in result.output
+
+    def test_cli_kind_jingle_force_no_kind_warning(self, tmp_path):
+        """CLI --kind jingle --force does not flag a long jingle."""
+        self._make_wav(tmp_path / "jingle.wav", 95.0)
+        runner = CliRunner()
+        result = runner.invoke(cli, [str(tmp_path), "--kind", "jingle",
+                                     "--force", "--quiet"])
+        assert "too_long_for_kind" not in result.output
