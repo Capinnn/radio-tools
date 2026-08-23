@@ -484,6 +484,77 @@ class TestGenPlaylistDryRun:
         assert not output_file.exists()
         assert not trigger_file.exists()
 
+    def test_clock_flag_is_forwarded(self, tmp_path, capsys):
+        library_file = tmp_path / "library.json"
+        library_file.write_text("[]\n", encoding="utf-8")
+
+        gen_playlist_once(
+            library_file=str(library_file),
+            rotation_file=str(ROOT / "config" / "rotation.json"),
+            output_file=str(tmp_path / "playlist.m3u"),
+            trigger_file=str(tmp_path / "trigger"),
+            hour=14,
+            seed=42,
+            clock=True,
+            dry_run=True,
+        )
+
+        assert "--clock" in capsys.readouterr().out
+
+    def test_clock_playlist_is_published_and_validated(self, tmp_path):
+        tracks = []
+        for category, duration in (
+            ("A", 780),
+            ("B", 900),
+            ("C", 840),
+            ("GOLD", 840),
+        ):
+            audio_path = tmp_path / f"{category}.mp3"
+            audio_path.touch()
+            tracks.append(
+                {
+                    "path": str(audio_path),
+                    "artist": f"{category} Artist",
+                    "title": f"{category} Song",
+                    "category": category,
+                    "duration": duration,
+                }
+            )
+        rotation = {
+            "categories": {
+                category: {"sph": 1}
+                for category in ("A", "B", "C", "GOLD")
+            },
+            "rules": {"artist_gap": 2, "title_gap": 1, "category_gap": 1},
+        }
+        library_file = tmp_path / "library.json"
+        rotation_file = tmp_path / "rotation.json"
+        output_file = tmp_path / "playlist.m3u"
+        trigger_file = tmp_path / "playlist.trigger"
+        library_file.write_text(json.dumps(tracks), encoding="utf-8")
+        rotation_file.write_text(json.dumps(rotation), encoding="utf-8")
+
+        gen_playlist_once(
+            library_file=str(library_file),
+            rotation_file=str(rotation_file),
+            output_file=str(output_file),
+            trigger_file=str(trigger_file),
+            hour=14,
+            seed=42,
+            clock=True,
+        )
+
+        assert trigger_file.exists()
+        assert "#CLOCK :00 ID" in output_file.read_text(encoding="utf-8")
+        sidecar = json.loads(output_file.with_suffix(".json").read_text())
+        assert sidecar["clock"]["template"] == "Default station hour"
+        assert [track["category"] for track in sidecar["tracks"]] == [
+            "A",
+            "B",
+            "C",
+            "GOLD",
+        ]
+
     def test_dry_run_missing_rotation_raises(self, tmp_path):
         with pytest.raises(EngineError, match="rotation file not found"):
             gen_playlist_once(

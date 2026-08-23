@@ -1304,6 +1304,7 @@ def gen_playlist_once(
     daypart: str | None = None,
     hour: int | None = None,
     seed: int | None = None,
+    clock: bool = False,
     dry_run: bool = False,
 ) -> None:
     """Generate one playlist run — ports gen-playlist.sh generate_once()."""
@@ -1361,6 +1362,8 @@ def gen_playlist_once(
     ]
     if daypart:
         command.extend(["--daypart", daypart])
+    if clock:
+        command.append("--clock")
 
     sidecar_file = output_file.rsplit(".", 1)[0] + ".json"
 
@@ -1387,6 +1390,8 @@ def gen_playlist_once(
             write_m3u,
             write_json_sidecar,
         )
+        if clock:
+            from broadcast.clock import DEFAULT_HOUR_TEMPLATE, render_hour
         from lib.playlist_loader import validate_playlist_pair
 
         # Load tracks.
@@ -1401,14 +1406,22 @@ def gen_playlist_once(
             raise EngineError("No audio files found.")
 
         rotation = load_rotation(rotation_file)
-        target = _parse_slot_seconds(slot)
+        target = 3600 if clock else _parse_slot_seconds(slot)
 
         engine = RotationEngine(
             tracks, rotation, seed=run_seed, daypart=daypart
         )
-        playlist = engine.generate(target_duration=target)
+        clock_template = None
+        if clock:
+            clock_template = DEFAULT_HOUR_TEMPLATE.name
+            playlist = render_hour(
+                DEFAULT_HOUR_TEMPLATE, engine, run_hour, run_seed
+            )
+        else:
+            playlist = engine.generate(target_duration=target)
 
-        if not playlist:
+        music_tracks = [item for item in playlist if "marker" not in item]
+        if not music_tracks:
             raise EngineError(
                 "could not generate a playlist "
                 "(check rotation config and library)"
@@ -1425,6 +1438,7 @@ def gen_playlist_once(
         write_json_sidecar(
             playlist, str(temp_m3u), seed=run_seed,
             daypart=daypart, target_duration=target,
+            clock_template=clock_template,
         )
         # write_json_sidecar writes sidecar next to the m3u path,
         # so it will be temp_dir/playlist.json.
@@ -1436,11 +1450,14 @@ def gen_playlist_once(
         Path(trigger_file).touch()
         temp_dir.rmdir()
 
-        total = sum(t.get("duration", 0) or 0.0 for t in playlist)
+        total = sum(t.get("duration", 0) or 0.0 for t in music_tracks)
         print(
-            f"Generated playlist: {len(playlist)} tracks, "
+            f"Generated playlist: {len(music_tracks)} tracks, "
             f"{total:.0f}s / {target:.0f}s target"
         )
+        if clock:
+            marker_count = len(playlist) - len(music_tracks)
+            print(f"  Clock: {clock_template} ({marker_count} markers)")
         print(f"  M3U:  {output_file}")
         print(f"  JSON: {sidecar_file}")
         if daypart:
@@ -1479,6 +1496,7 @@ def do_gen_playlist(
     daypart: str | None = None,
     hour: int | None = None,
     seed: int | None = None,
+    clock: bool = False,
     loop: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -1496,6 +1514,7 @@ def do_gen_playlist(
             daypart=daypart,
             hour=hour,
             seed=seed,
+            clock=clock,
             dry_run=dry_run,
         )
 
@@ -1668,6 +1687,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Program-clock hour 0-23.")
     p_gen.add_argument("--seed", type=int, default=None,
                        help="Deterministic seed.")
+    p_gen.add_argument("--clock", action="store_true",
+                       help="Build the default station-clock hour.")
     p_gen.add_argument("--loop", action="store_true",
                        help="Repeat at the next hour boundary.")
     p_gen.add_argument("--dry-run", action="store_true",
@@ -1730,6 +1751,7 @@ def main(argv: list[str] | None = None) -> int:
                 daypart=args.daypart,
                 hour=args.hour,
                 seed=args.seed,
+                clock=args.clock,
                 loop=args.loop,
                 dry_run=args.dry_run,
             )
