@@ -23,9 +23,11 @@ logbook = "broadcast.logbook:cli"
 broadcast-clock = "broadcast.utilities:broadcast_clock_cli"
 intro-outro = "broadcast.utilities:intro_outro_cli"
 countdown = "broadcast.utilities:countdown_cli"
+radio = "engine.__main__:main"
 
 [tool.setuptools]
-packages = ["broadcast"]
+packages = ["broadcast", "engine", "lib"]
+package-dir = {"broadcast" = ".", "engine" = "liquidsoap/engine", "lib" = "liquidsoap/lib"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

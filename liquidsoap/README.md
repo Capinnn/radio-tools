@@ -6,10 +6,14 @@ ReplayGain and a four-second crossfade, and sends `/radio.mp3` to Icecast.
 Silence with a `Rotation unavailable` title keeps the mount alive when the
 playlist is absent or empty.
 
+The lifecycle is driven by the `radio` command — a cross-platform Python
+engine manager (`engine/`) that works on both Linux and Windows. The legacy
+bash scripts in `bin/` still work on Linux but are superseded.
+
 ## First setup
 
-The checked-in Icecast file is a valid XML template. `bin/start.sh` fills its
-placeholders from the environment and writes a mode-0600 runtime copy under
+The checked-in Icecast file is a valid XML template. The `radio` command fills
+its placeholders from the environment and writes a mode-0600 runtime copy under
 `logs/`; no credential is stored in Git.
 
 ```bash
@@ -30,30 +34,30 @@ It follows [`broadcast/formats.md`](../broadcast/formats.md). Then generate the
 first hour:
 
 ```bash
-bin/gen-playlist.sh --source /absolute/path/to/music
+radio gen-playlist --source /absolute/path/to/music
 # Or use a broadcast-format index:
-bin/gen-playlist.sh --library /absolute/path/to/library.json
+radio gen-playlist --library /absolute/path/to/library.json
 ```
 
-The wrapper activates `/home/<you>/radio-tools/.venv`, calls the installed
-`playlistgen` entry point, validates the JSON sidecar against the M3U, publishes
-both files atomically, and touches `data/playlist.trigger`. A failed generation
-leaves the currently playing hour untouched.
+The `radio gen-playlist` command calls the installed `playlistgen` entry point,
+validates the JSON sidecar against the M3U, publishes both files atomically, and
+touches `data/playlist.trigger`. A failed generation leaves the currently
+playing hour untouched.
 
 ## Daily operation
 
 Start rotation mode, inspect status, and stop the chain with:
 
 ```bash
-bin/start.sh
-curl http://127.0.0.1:8000/status-json.xsl
-bin/stop.sh
+radio start
+radio status
+radio stop
 ```
 
 For live assist, use:
 
 ```bash
-bin/start.sh --live
+radio start --live
 ```
 
 `scripts/live.liq` enables the default PulseAudio input. When that input is
@@ -65,14 +69,14 @@ the current point in rotation.
 For an always-running playlist generator:
 
 ```bash
-bin/gen-playlist.sh --source /absolute/path/to/music --loop
+radio gen-playlist --source /absolute/path/to/music --loop
 ```
 
 It generates immediately, then sleeps to the next local hour boundary. For
 cron, run the one-shot command at minute zero instead:
 
 ```cron
-0 * * * * /home/<you>/radio-tools/liquidsoap/bin/gen-playlist.sh --source /absolute/path/to/music >> /home/<you>/radio-tools/liquidsoap/logs/playlistgen.log 2>&1
+0 * * * * /home/<you>/radio-tools/.venv/bin/radio gen-playlist --source /absolute/path/to/music >> /home/<you>/radio-tools/liquidsoap/logs/playlistgen.log 2>&1
 ```
 
 Useful generation options are `--rotation`, `--daypart`, `--seed`, `--slot`,
@@ -84,6 +88,115 @@ Logs and PID files live in `logs/`. The generated playlist and sidecar live in
 `data/`. Both runtime directories are ignored except for their `.gitkeep`
 files. Start and stop refuse to run as root unless `--force-root` is explicit.
 
+## Command reference
+
+```
+radio start [--live] [--force-root]
+    Start Icecast then Liquidsoap. Default mode is station rotation;
+    --live selects the live-assist script.
+
+radio stop [--force-root]
+    Stop Liquidsoap first, then Icecast. PID files and the rendered
+    runtime config are removed; logs are retained.
+
+radio status
+    Report each component UP/DOWN with PID, plus Icecast listener count,
+    server type, now-playing title, and audio info.
+
+radio restart [--live] [--force-root]
+    Stop the chain, then start it again.
+
+radio smoke [--duration N] [--keep]
+    End-to-end smoke test: start, capture N seconds of MP3 audio (default 20),
+    verify MP3 sync bytes and Icecast reports audio/mpeg with >=1 listener,
+    then stop. --keep leaves the chain running for debugging.
+
+radio gen-playlist [OPTIONS]
+    Generate a playlist using broadcast/playlistgen. Flags mirror the
+    legacy gen-playlist.sh: --source, --library, --rotation, --output,
+    --trigger, --slot, --daypart, --hour, --seed, --loop, --dry-run.
+
+radio bin-paths
+    Print resolved paths for liquidsoap and icecast binaries (env override
+    LIQUIDSOAP_BIN / ICECAST_BIN, then PATH, then platform defaults).
+```
+
+## Smoke test
+
+`radio smoke` runs the full end-to-end chain — start Icecast + Liquidsoap,
+capture 20 seconds of MP3 audio, verify Icecast reports `audio/mpeg` and at
+least one listener, then stop the chain. It exits nonzero on any failure.
+
+```bash
+radio smoke
+```
+
+Override the capture duration or leave the chain running for inspection:
+
+```bash
+radio smoke --duration 30
+radio smoke --keep
+```
+
+## Windows
+
+Windows support is via the new `radio` engine manager (Python). The legacy bash
+scripts in `bin/` do not work on Windows.
+
+### Prerequisites
+
+1. **Python 3.11+** — install from [python.org](https://python.org) or `winget
+   install Python.Python.3.11`. Ensure `python` and `pip` are on your PATH.
+
+2. **Icecast** — download the official Windows build from
+   [icecast.org/download](https://icecast.org/download/). The `radio` command
+   searches `%ProgramFiles%\Icecast*\bin\icecast.exe` and
+   `%ProgramFiles(x86)%\Icecast*\bin\icecast.exe` automatically. You can also
+   set the `ICECAST_BIN` environment variable to the full path.
+
+   **Config path note:** on Windows the Icecast `<paths>` section in
+   `config/icecast.xml` references `/usr/share/icecast2/web` and
+   `/usr/share/icecast2/admin` which are Linux paths. You must edit the rendered
+   runtime config (or the template) to point at the `web` and `admin`
+   subdirectories inside your Icecast install directory, e.g.
+   `C:\Program Files\Icecast2 2.4.4\share\icecast\web` and `...\admin`.
+
+3. **Liquidsoap** — download the official Windows build from
+   [liquidsoap.info/download](https://www.liquidsoap.info/download). Ensure
+   `liquidsoap.exe` is on your PATH, or set `LIQUIDSOAP_BIN` to the full path.
+
+4. **Install the radio-tools package:**
+
+```powershell
+cd C:\path\to\radio-tools
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+```
+
+5. **Create the secrets file** (once, gitignored):
+
+```powershell
+cd liquidsoap
+copy config\secrets.env.example config\secrets.env
+# Edit config\secrets.env — replace the source password with a 12+ char value.
+```
+
+6. **Use the same radio commands:**
+
+```powershell
+radio start
+radio status
+radio stop
+radio gen-playlist --source C:\path\to\music
+radio smoke --duration 20
+```
+
+The `radio` command handles cross-platform process management: on Windows it
+uses `taskkill /PID /T /F` for termination and `ctypes` Win32 API calls for
+process-alive checks, skipping the POSIX-only `/proc/$pid/cmdline` verification.
+On POSIX it uses `os.kill` with `SIGTERM`/`SIGKILL` and the `/proc` safety check.
+
 ## Checks
 
 ```bash
@@ -92,28 +205,11 @@ liquidsoap --check scripts/live.liq
 ../.venv/bin/python -m pytest tests -q
 ```
 
-## Smoke test
-
-`bin/smoke.sh` runs the full end-to-end chain — start Icecast + Liquidsoap,
-capture 20 seconds of MP3 audio, verify Icecast reports `audio/mpeg` and at
-least one listener, then stop the chain.  It exits nonzero on any failure.
-
-```bash
-bin/smoke.sh
-```
-
-Override the capture duration or leave the chain running for inspection:
-
-```bash
-bin/smoke.sh --duration 30
-bin/smoke.sh --keep
-```
-
 ## Running the station (start, verify, stop)
 
 Prerequisites: Icecast 2.4.4 and Liquidsoap 2.2.x installed, the repo
-virtualenv at `../.venv` with `playlistgen` available, and a music directory
-of tagged MP3s.
+virtualenv at `../.venv` with `radio` and `playlistgen` available, and a music
+directory of tagged MP3s.
 
 1. **Create the secrets file** (once, gitignored):
 
@@ -126,13 +222,13 @@ chmod 600 config/secrets.env
 2. **Generate the playlist** into `data/playlist.m3u`:
 
 ```bash
-bin/gen-playlist.sh --source /tmp/radiotest/music
+radio gen-playlist --source /tmp/radiotest/music
 ```
 
 3. **Start the chain**:
 
 ```bash
-bin/start.sh
+radio start
 ```
 
 4. **Verify the stream**:
@@ -143,13 +239,11 @@ curl -s -m 20 http://127.0.0.1:8000/radio.mp3 > /tmp/stream.bin
 wc -c /tmp/stream.bin          # ~350 KB expected for 20s at 128 kbps
 
 # Icecast status — listener count, bitrate, now-playing title:
-curl -s http://127.0.0.1:8000/status-json.xsl | python3 -m json.tool \
-  | grep -E 'listener|bitrate|title|server_type'
+radio status
 ```
 
 5. **Stop the chain**:
 
 ```bash
-bin/stop.sh
+radio stop
 ```
-

@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 broadcast/__init__.py
 broadcast/logbook.py
@@ -11,6 +12,11 @@ broadcast.egg-info/dependency_links.txt
 broadcast.egg-info/entry_points.txt
 broadcast.egg-info/requires.txt
 broadcast.egg-info/top_level.txt
+liquidsoap/engine/__main__.py
+liquidsoap/lib/__init__.py
+liquidsoap/lib/check_mp3_sync.py
+liquidsoap/lib/parse_status.py
+liquidsoap/lib/playlist_loader.py
 tests/test_logbook.py
 tests/test_playlistgen.py
 tests/test_schedule.py

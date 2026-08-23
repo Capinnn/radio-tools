@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Superseded by the radio engine manager on other platforms.
+# This script works on Linux only. Use `radio stop` (Python, cross-platform)
+# for Linux + Windows.  See liquidsoap/engine/ and liquidsoap/README.md.
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
