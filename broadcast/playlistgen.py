@@ -255,15 +255,24 @@ class RotationEngine:
             sph = 0.5
         return sph * (1.0 + self.rng.random())
 
-    def generate(self, target_duration: float = 3600.0) -> list[dict]:
+    def generate(self, target_duration: float = 3600.0, *,
+                 history: list[dict] | None = None,
+                 strict_gaps: bool = False) -> list[dict]:
         """Pick tracks until total duration reaches *target_duration* seconds.
 
-        Returns the ordered list of selected tracks.
+        ``history`` supplies preceding tracks for gap checks without including
+        them in the result.  With ``strict_gaps`` enabled, generation stops
+        instead of relaxing the configured gaps when no candidate is valid.
+        Both options are used by station-clock blocks; flat playlist behavior
+        remains unchanged by default.
+
+        Returns the ordered list of newly selected tracks.
         """
         if not self.tracks:
             return []
 
         playlist: list[dict] = []
+        preceding = list(history or [])
         used: set[int] = set()
         total = 0.0
         max_tracks = len(self.tracks) * 3  # safety valve
@@ -274,12 +283,14 @@ class RotationEngine:
                 if i in used and len(used) >= len(self.tracks):
                     # All tracks used — reset to allow repeats
                     pass
-                if not self._is_valid(track, playlist, used):
+                if not self._is_valid(track, preceding + playlist, used):
                     continue
                 score = self._score(track, playlist)
                 candidates.append((score, i))
 
             if not candidates:
+                if strict_gaps:
+                    break
                 # No valid candidates (all filtered by gap rules).
                 # Relax: pick any unused track, or if all used, pick best-scored.
                 for i, track in enumerate(self.tracks):
@@ -311,11 +322,45 @@ class RotationEngine:
 
 # ── output ──────────────────────────────────────────────────────────────
 
-def write_m3u(tracks: list[dict], output_path: str) -> None:
-    """Write an M3U playlist file."""
+def _marker_value(item) -> str | None:
+    if isinstance(item, dict) and "marker" in item:
+        return str(item["marker"])
+    if isinstance(item, str) and (
+        getattr(item, "_clock_marker", False)
+        or item in {"ID", "PROMO"}
+        or item.startswith("SWEEPER:")
+    ):
+        return item
+    return None
+
+
+def _is_marker(item) -> bool:
+    return _marker_value(item) is not None
+
+
+def _track_dict(item) -> dict:
+    """Normalise a metadata-rich track or a plain path from build_hour()."""
+    if isinstance(item, dict):
+        return item
+    return {"path": str(item)}
+
+
+def write_m3u(tracks: list[dict | str], output_path: str) -> None:
+    """Write an M3U playlist file, rendering clock events as comments."""
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
-        for track in tracks:
+        for item in tracks:
+            marker = _marker_value(item)
+            if marker is not None:
+                label = (
+                    item.get("_clock_position_label", "")
+                    if isinstance(item, dict)
+                    else getattr(item, "_clock_position_label", "")
+                )
+                detail = f" {label}" if label else ""
+                f.write(f"#CLOCK{detail} {marker}\n")
+                continue
+            track = _track_dict(item)
             duration = int(track.get("duration", 0) or 0)
             artist = track.get("artist", "")
             title = track.get("title", "")
@@ -324,12 +369,16 @@ def write_m3u(tracks: list[dict], output_path: str) -> None:
             f.write(f"{track['path']}\n")
 
 
-def write_json_sidecar(tracks: list[dict], output_path: str,
+def write_json_sidecar(tracks: list[dict | str], output_path: str,
                        seed: int, daypart: str | None,
-                       target_duration: float) -> None:
+                       target_duration: float,
+                       clock_template: str | None = None) -> None:
     """Write the JSON sidecar next to the M3U file."""
     sidecar = Path(output_path).with_suffix(".json")
-    total = sum(t.get("duration", 0) or 0.0 for t in tracks)
+    music_tracks = [
+        _track_dict(item) for item in tracks if not _is_marker(item)
+    ]
+    total = sum(t.get("duration", 0) or 0.0 for t in music_tracks)
     data = {
         "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "seed": seed,
@@ -345,9 +394,49 @@ def write_json_sidecar(tracks: list[dict], output_path: str,
                 "category": t.get("category"),
                 "duration": t.get("duration", 0),
             }
-            for i, t in enumerate(tracks)
+            for i, t in enumerate(music_tracks)
         ],
     }
+    if any(_is_marker(item) for item in tracks):
+        clock_items = []
+        for i, item in enumerate(tracks):
+            marker = _marker_value(item)
+            if marker is not None:
+                clock_items.append(
+                    {
+                        "position": i + 1,
+                        "type": "event",
+                        "marker": marker,
+                        "scheduled_seconds": item.get(
+                            "_clock_position_seconds"
+                        ) if isinstance(item, dict) else getattr(
+                            item, "_clock_position_seconds", None
+                        ),
+                        "scheduled_label": item.get(
+                            "_clock_position_label"
+                        ) if isinstance(item, dict) else getattr(
+                            item, "_clock_position_label", None
+                        ),
+                    }
+                )
+                continue
+            track = _track_dict(item)
+            clock_items.append(
+                {
+                    "position": i + 1,
+                    "type": "track",
+                    "path": track["path"],
+                    "source_category": track.get("_clock_source_category"),
+                    "scheduled_seconds": track.get(
+                        "_clock_position_seconds"
+                    ),
+                    "scheduled_label": track.get("_clock_position_label"),
+                }
+            )
+        data["clock"] = {
+            "template": clock_template,
+            "items": clock_items,
+        }
     with open(sidecar, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -400,12 +489,14 @@ def _parse_slot(slot: str) -> int:
               help="Daypart name to apply weight overrides (e.g. 'Morning').")
 @click.option("--seed", default=0, type=int,
               help="Random seed for deterministic output. Same seed = same playlist.")
+@click.option("--clock", "clock_mode", is_flag=True,
+              help="Build the default station-clock hour with fixed event markers.")
 @click.option("--scan", is_flag=True,
               help="Force folder scan even if --library is given (refresh tags).")
 @click.option("--dump-library", is_flag=True,
               help="Scan the folder, write library.json, and exit (no playlist).")
 def cli(source, library_path, rotation_path, output, hour, slot,
-        daypart, seed, scan, dump_library):
+        daypart, seed, clock_mode, scan, dump_library):
     """Entry point for the playlistgen command."""
     # Validate inputs
     if not source and not library_path:
@@ -460,7 +551,7 @@ def cli(source, library_path, rotation_path, output, hour, slot,
         raise SystemExit(1)
 
     # Determine target duration
-    target = _parse_slot(slot)
+    target = 3600 if clock_mode else _parse_slot(slot)
 
     # If --hour is given and no --daypart, try to infer daypart from rotation
     if hour is not None and not daypart:
@@ -468,20 +559,35 @@ def cli(source, library_path, rotation_path, output, hour, slot,
 
     # Generate
     engine = RotationEngine(tracks, rotation, seed=seed, daypart=daypart)
-    playlist = engine.generate(target_duration=target)
+    clock_template = None
+    if clock_mode:
+        from .clock import DEFAULT_HOUR_TEMPLATE, render_hour
 
-    if not playlist:
+        clock_template = DEFAULT_HOUR_TEMPLATE.name
+        run_hour = hour if hour is not None else datetime.now().hour
+        playlist = render_hour(
+            DEFAULT_HOUR_TEMPLATE, engine, run_hour, seed
+        )
+    else:
+        playlist = engine.generate(target_duration=target)
+
+    music_tracks = [track for track in playlist if not _is_marker(track)]
+    if not music_tracks:
         click.echo("Error: could not generate a playlist (check rotation config and library).", err=True)
         raise SystemExit(1)
 
     # Write output
     write_m3u(playlist, output)
     write_json_sidecar(playlist, output, seed=seed, daypart=daypart,
-                       target_duration=target)
+                       target_duration=target,
+                       clock_template=clock_template)
 
-    total = sum(t.get("duration", 0) or 0.0 for t in playlist)
-    click.echo(f"Generated playlist: {len(playlist)} tracks, "
+    total = sum(t.get("duration", 0) or 0.0 for t in music_tracks)
+    click.echo(f"Generated playlist: {len(music_tracks)} tracks, "
                f"{total:.0f}s / {target:.0f}s target")
+    if clock_mode:
+        marker_count = len(playlist) - len(music_tracks)
+        click.echo(f"  Clock: {clock_template} ({marker_count} markers)")
     click.echo(f"  M3U:  {output}")
     click.echo(f"  JSON: {Path(output).with_suffix('.json')}")
     if daypart:

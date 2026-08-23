@@ -165,9 +165,11 @@ def test_build_hour_output_writes_markers_as_m3u_comments(tmp_path):
     write_m3u(rendered, str(output_path))
 
     content = output_path.read_text(encoding="utf-8")
-    assert "#CLOCK ID" in content
-    assert "#CLOCK SWEEPER:station" in content
-    assert "\nID\n" not in content
+    assert "#CLOCK :00 ID" in content
+    assert "#CLOCK :14 SWEEPER:station" in content
+    assert "#CLOCK :30 PROMO" in content
+    assert "#CLOCK :45 SWEEPER:station" in content
+    assert "ID" in content.splitlines()[1]
 
 
 def test_default_markers_are_at_expected_minutes():

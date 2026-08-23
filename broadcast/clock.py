@@ -368,7 +368,12 @@ def build_hour(
     result: list[str] = []
     for item in render_hour(template, rotation_engine, hour_of_day, seed):
         if "marker" in item:
-            result.append(ClockMarker(item["marker"]))
+            marker = ClockMarker(item["marker"])
+            marker._clock_position_seconds = item.get(
+                "_clock_position_seconds"
+            )
+            marker._clock_position_label = item.get("_clock_position_label")
+            result.append(marker)
             continue
         identifier = item.get("path") or item.get("id")
         if identifier is not None:
