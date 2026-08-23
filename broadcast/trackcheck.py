@@ -15,6 +15,7 @@ Usage:
   trackcheck /music --json report.json # write report as JSON
   trackcheck /sweepers --kind sweep    # scan as short-form sweepers
   trackcheck /jingles --kind jingle --force  # allow long jingles
+  trackcheck /liners --kind liner           # scan as voice-tracked liners
 """
 
 from __future__ import annotations
@@ -213,6 +214,7 @@ def _fix_empty_tags(path: str, audio, stem: str) -> list[str]:
 KIND_DURATION_LIMITS: dict[str, float] = {
     "sweeper": 90.0,
     "jingle": 90.0,
+    "liner": 30.0,
 }
 
 
@@ -226,7 +228,7 @@ def scan_library(folder: str, min_duration: float = 0.0,
       min_duration Flag tracks shorter than this (seconds). 0 = no check.
       max_duration Flag tracks longer than this (seconds). 0 = no check.
       fix          If True, fill empty tags from filename (non-destructive).
-      kind         Audio kind: "music" (default), "sweeper", or "jingle".
+      kind         Audio kind: "music" (default), "sweeper", "jingle", or "liner".
                    When not "music", short-form duration limits apply and
                    the report is tagged with the kind.
       force        When True, short-form duration warnings are suppressed
@@ -502,13 +504,13 @@ def render_report(report: dict) -> str:
               help="Write the full report as JSON to this path.")
 @click.option("--quiet", is_flag=True,
               help="Suppress the human-readable report (use with --json).")
-@click.option("--kind", type=click.Choice(["music", "sweep", "jingle"],
+@click.option("--kind", type=click.Choice(["music", "sweep", "jingle", "liner"],
               case_sensitive=False), default="music",
               show_default=True,
-              help="Audio kind: music (default), sweep, or jingle. "
+              help="Audio kind: music (default), sweep, jingle, or liner. "
                    "When not music, short-form duration limits apply.")
 @click.option("--force", is_flag=True,
-              help="With --kind sweep|jingle, allow files longer than the "
+              help="With --kind sweep|jingle|liner, allow files longer than the "
                    "short-form limit (still scanned, not flagged).")
 def cli(folder, fix, min_duration, max_duration, json_output, quiet, kind, force):
     """Entry point for the trackcheck command."""

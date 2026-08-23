@@ -135,6 +135,8 @@ class ClockSlot:
             return "PROMO"
         if kind == "sweeper":
             return f"SWEEPER:{(self.name or 'station').strip()}"
+        if kind == "liner":
+            return f"LINER:{(self.name or 'station').strip()}"
         if kind == "event":
             assert self.name is not None
             return self.name.strip().upper()
@@ -196,6 +198,86 @@ def _seed_for_block(seed: int, hour_of_day: int, slot_index: int) -> int:
     return block_seed
 
 
+# ── voice-tracked liners ────────────────────────────────────────────────
+#
+# A liner is a short pre-recorded voice file ("You're listening to…") that
+# plays between songs at scheduled clock positions.  Like sweeper slots, a
+# liner slot tries to substitute a kind=liner file from the library; if
+# none is available, the text marker (LINER:station) is kept as fallback.
+
+# Default liner positions within the hour, expressed as clock labels.
+# These are the positions where a liner fires when --liners is enabled.
+CLOCK_LINER_SLOTS: tuple[str, ...] = (":05", ":40")
+
+
+@dataclass(frozen=True)
+class LinerTemplate(HourTemplate):
+    """An hour template with voice-tracked liner slots injected.
+
+    Wraps a base :class:`HourTemplate` and inserts ``kind="liner"`` clock
+    slots at configurable positions (default ``:05`` and ``:40``).  When a
+    liner slot fires and a ``kind=liner`` file exists in the library, the
+    file plays instead of the marker — mirroring the sweeper substitution.
+    """
+
+    liner_positions: tuple[str, ...] = CLOCK_LINER_SLOTS
+
+    def __post_init__(self) -> None:
+        # HourTemplate.__post_init__ already validates name/slots ordering.
+        super().__post_init__()
+        # Validate liner position labels.
+        for label in self.liner_positions:
+            _seconds_from_label(label)
+
+
+def with_liners(
+    template: HourTemplate,
+    positions: tuple[str, ...] | list[str] | None = None,
+    name: str | None = None,
+    liner_name: str = "station",
+) -> LinerTemplate:
+    """Return a copy of *template* with liner slots inserted at *positions*.
+
+    Liner slots are inserted in time order alongside the existing slots.
+    If a liner position coincides with an existing slot, the liner is
+    dropped for that position (the existing event takes precedence).
+
+    The resulting template is a :class:`LinerTemplate` so downstream code
+    can detect that liners are enabled.
+    """
+    pos_labels = tuple(positions) if positions is not None else CLOCK_LINER_SLOTS
+
+    # Build the combined slot list, inserting liner slots at the right
+    # chronological positions.
+    existing_offsets = {slot.offset_seconds: slot for slot in template.slots}
+    new_slots: list[ClockSlot] = []
+
+    for label in pos_labels:
+        offset = _seconds_from_label(label)
+        if offset in existing_offsets:
+            # Existing slot at this position takes precedence.
+            continue
+        liner_slot = ClockSlot(
+            position_label=label,
+            kind="liner",
+            name=liner_name,
+        )
+        new_slots.append(liner_slot)
+
+    all_slots = list(template.slots) + new_slots
+    # Sort by offset; ties (shouldn't happen due to the dedup above) keep
+    # existing slots first for stability.
+    all_slots.sort(
+        key=lambda s: (s.offset_seconds, 0 if s in template.slots else 1)
+    )
+
+    return LinerTemplate(
+        name=name or template.name,
+        slots=all_slots,
+        liner_positions=pos_labels,
+    )
+
+
 # Map clock event kinds to the library track ``kind`` tag they prefer.
 # When a slot is sweeper or promo, build_hour looks for a library track
 # tagged with the corresponding kind and uses its path instead of the
@@ -203,6 +285,7 @@ def _seed_for_block(seed: int, hour_of_day: int, slot_index: int) -> int:
 _EVENT_KIND_TO_TRACK_KIND = {
     "sweeper": "sweeper",
     "promo": "jingle",
+    "liner": "liner",
 }
 
 
@@ -385,7 +468,10 @@ __all__ = [
     "ClockSlot",
     "ClockMarker",
     "HourTemplate",
+    "LinerTemplate",
     "DEFAULT_HOUR_TEMPLATE",
+    "CLOCK_LINER_SLOTS",
+    "with_liners",
     "build_hour",
     "render_hour",
 ]

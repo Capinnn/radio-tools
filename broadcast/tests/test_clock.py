@@ -360,3 +360,106 @@ def test_legal_id_slot_not_substituted_by_sweeper():
 
     assert "ID" in result
     assert "/sweepers/station-id.mp3" not in result
+
+
+# ── voice-tracked liner slots ───────────────────────────────────────────
+
+
+def test_liner_slot_uses_tagged_liner_file():
+    """A liner slot should use a kind=liner file from the library."""
+    template = HourTemplate(
+        "Liner substitution",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":05", kind="liner", name="station"),
+            ClockSlot(position_label=":06", kind="music", source_category="B"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track("/music/b1.mp3", "Artist B", "B", 60),
+        _track_with_kind("/liners/youre-listening-to.mp3", "Station",
+                         "liners", 10, kind="liner"),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    # The liner slot should be replaced with the file path, not a marker.
+    assert "/liners/youre-listening-to.mp3" in result
+    assert "LINER:station" not in result
+
+
+def test_liner_slot_falls_back_to_marker_without_tagged_file():
+    """Without a kind=liner file, the marker should be kept."""
+    template = HourTemplate(
+        "Liner fallback",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":05", kind="liner", name="station"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+    ]
+    result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    assert "LINER:station" in result
+
+
+def test_with_liners_injects_liner_slots_at_default_positions():
+    """with_liners adds liner slots at :05 and :40 into the default template."""
+    from broadcast.clock import with_liners, CLOCK_LINER_SLOTS
+
+    enriched = with_liners(DEFAULT_HOUR_TEMPLATE)
+    assert isinstance(enriched, type(DEFAULT_HOUR_TEMPLATE))  # subclass
+    liner_slots = [s for s in enriched.slots if s.event_kind == "liner"]
+    assert len(liner_slots) == 2
+    assert [s.label for s in liner_slots] == list(CLOCK_LINER_SLOTS)
+
+
+def test_liner_cli_flag_passes_through(tmp_path):
+    """--liners flag enables liner markers in the clock CLI output."""
+    tracks = [
+        _track("/music/power.mp3", "Power Artist", "A", 780),
+        _track("/music/hot.mp3", "Hot Artist", "B", 900),
+        _track("/music/recurrent.mp3", "Recurrent Artist", "C", 840),
+        _track("/music/gold.mp3", "Gold Artist", "GOLD", 840),
+    ]
+    rotation = {
+        "categories": {
+            "A": {"sph": 4},
+            "B": {"sph": 3},
+            "C": {"sph": 2},
+            "GOLD": {"sph": 1},
+        },
+        "rules": {"artist_gap": 2, "title_gap": 1, "category_gap": 1},
+    }
+    library_path = tmp_path / "library.json"
+    rotation_path = tmp_path / "rotation.json"
+    output_path = tmp_path / "clock.m3u"
+    library_path.write_text(json.dumps(tracks), encoding="utf-8")
+    rotation_path.write_text(json.dumps(rotation), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--library",
+            str(library_path),
+            "--rotation",
+            str(rotation_path),
+            "--liners",
+            "--hour",
+            "14",
+            "--seed",
+            "42",
+            "-o",
+            str(output_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Liners: enabled" in result.output
+    m3u = output_path.read_text(encoding="utf-8")
+    # With no kind=liner files in the library, liner slots produce markers.
+    assert "LINER:station" in m3u
+    # Existing clock events are still present.
+    assert "#CLOCK :00 ID" in m3u

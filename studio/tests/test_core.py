@@ -88,6 +88,19 @@ def test_scan_tags_jingles_subfolder(store, music_dir):
     assert jingle["category"] == "jingles"
 
 
+def test_scan_tags_liners_subfolder(store, music_dir):
+    """Files under liners/ get kind='liner' and category='liners'."""
+    from make_test_tracks import write_tone
+    liners = music_dir / "liners"
+    liners.mkdir()
+    write_tone(str(liners / "youre-listening-to.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    liner = next(t for t in library if t["filename"] == "youre-listening-to.wav")
+    assert liner["kind"] == "liner"
+    assert liner["category"] == "liners"
+
+
 def test_scan_music_files_have_no_kind(store):
     """Regular music files should not have a kind tag (or it is empty)."""
     store.scan()

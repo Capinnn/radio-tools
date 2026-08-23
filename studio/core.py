@@ -880,9 +880,9 @@ class Store:
                     if existing and existing.get("mtime") == stat.st_mtime:
                         continue
                     tags = read_tags(full)
-                    # Recognise sweepers/ and jingles/ subfolders under the
-                    # music root. Files there get a kind metadata field and
-                    # their category set to the subfolder name.
+                    # Recognise sweepers/, jingles/, and liners/ subfolders
+                    # under the music root. Files there get a kind metadata
+                    # field and their category set to the subfolder name.
                     top_folder = rel.parts[0] if len(rel.parts) > 1 else ""
                     inferred_kind = ""
                     inferred_category = ""
@@ -891,6 +891,9 @@ class Store:
                         inferred_category = top_folder
                     elif top_folder.lower() == "jingles":
                         inferred_kind = "jingle"
+                        inferred_category = top_folder
+                    elif top_folder.lower() == "liners":
+                        inferred_kind = "liner"
                         inferred_category = top_folder
                     if existing:
                         # A rescan after an on-disk edit should win, but a

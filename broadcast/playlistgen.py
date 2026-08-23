@@ -16,6 +16,9 @@ Usage examples:
 
   # Use a pre-built library index instead of scanning a folder
   playlistgen --library library.json --rotation rotation.json -o pl.m3u
+
+  # Clock hour with voice-tracked liners at :05 and :40
+  playlistgen --library library.json --rotation rotation.json --clock --liners -o hour.m3u
 """
 
 from __future__ import annotations
@@ -329,6 +332,7 @@ def _marker_value(item) -> str | None:
         getattr(item, "_clock_marker", False)
         or item in {"ID", "PROMO"}
         or item.startswith("SWEEPER:")
+        or item.startswith("LINER:")
     ):
         return item
     return None
@@ -491,12 +495,15 @@ def _parse_slot(slot: str) -> int:
               help="Random seed for deterministic output. Same seed = same playlist.")
 @click.option("--clock", "clock_mode", is_flag=True,
               help="Build the default station-clock hour with fixed event markers.")
+@click.option("--liners", "liners_enabled", is_flag=True,
+              help="Enable voice-tracked liner slots in the clock hour "
+                   "(at :05 and :40 by default). Implies --clock.")
 @click.option("--scan", is_flag=True,
               help="Force folder scan even if --library is given (refresh tags).")
 @click.option("--dump-library", is_flag=True,
               help="Scan the folder, write library.json, and exit (no playlist).")
 def cli(source, library_path, rotation_path, output, hour, slot,
-        daypart, seed, clock_mode, scan, dump_library):
+        daypart, seed, clock_mode, liners_enabled, scan, dump_library):
     """Entry point for the playlistgen command."""
     # Validate inputs
     if not source and not library_path:
@@ -551,7 +558,7 @@ def cli(source, library_path, rotation_path, output, hour, slot,
         raise SystemExit(1)
 
     # Determine target duration
-    target = 3600 if clock_mode else _parse_slot(slot)
+    target = 3600 if (clock_mode or liners_enabled) else _parse_slot(slot)
 
     # If --hour is given and no --daypart, try to infer daypart from rotation
     if hour is not None and not daypart:
@@ -560,13 +567,18 @@ def cli(source, library_path, rotation_path, output, hour, slot,
     # Generate
     engine = RotationEngine(tracks, rotation, seed=seed, daypart=daypart)
     clock_template = None
-    if clock_mode:
-        from .clock import DEFAULT_HOUR_TEMPLATE, render_hour
+    if clock_mode or liners_enabled:
+        from .clock import DEFAULT_HOUR_TEMPLATE, render_hour, with_liners
 
-        clock_template = DEFAULT_HOUR_TEMPLATE.name
+        if liners_enabled:
+            hour_template = with_liners(DEFAULT_HOUR_TEMPLATE)
+            clock_template = hour_template.name
+        else:
+            hour_template = DEFAULT_HOUR_TEMPLATE
+            clock_template = hour_template.name
         run_hour = hour if hour is not None else datetime.now().hour
         playlist = render_hour(
-            DEFAULT_HOUR_TEMPLATE, engine, run_hour, seed
+            hour_template, engine, run_hour, seed
         )
     else:
         playlist = engine.generate(target_duration=target)
@@ -585,9 +597,11 @@ def cli(source, library_path, rotation_path, output, hour, slot,
     total = sum(t.get("duration", 0) or 0.0 for t in music_tracks)
     click.echo(f"Generated playlist: {len(music_tracks)} tracks, "
                f"{total:.0f}s / {target:.0f}s target")
-    if clock_mode:
+    if clock_mode or liners_enabled:
         marker_count = len(playlist) - len(music_tracks)
         click.echo(f"  Clock: {clock_template} ({marker_count} markers)")
+        if liners_enabled:
+            click.echo(f"  Liners: enabled")
     click.echo(f"  M3U:  {output}")
     click.echo(f"  JSON: {Path(output).with_suffix('.json')}")
     if daypart:
