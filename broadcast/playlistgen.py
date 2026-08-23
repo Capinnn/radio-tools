@@ -47,6 +47,11 @@ except Exception:  # pragma: no cover
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".wma"}
 
+# Library track kinds that are short-form station audio, not music. These must
+# never be selected as music tracks by the flat rotation engine; they only
+# air at clock event slots via _pick_short_form_track().
+_SHORT_FORM_KINDS = frozenset(("sweeper", "jingle"))
+
 
 def _detect_category(path: str, artist: str, title: str) -> str | None:
     """Guess a category from the filename/folder structure.
@@ -283,6 +288,13 @@ class RotationEngine:
         while total < target_duration and len(playlist) < max_tracks:
             candidates: list[tuple[float, int]] = []
             for i, track in enumerate(self.tracks):
+                # Short-form audio (kind=sweeper/jingle) must never be picked
+                # as a music track in a normal rotation. Those files belong in
+                # clock event slots, which substitute them explicitly via
+                # _pick_short_form_track(); letting the flat engine reach them
+                # would drop a 20s station ID into the middle of a music block.
+                if str(track.get("kind") or "").lower() in _SHORT_FORM_KINDS:
+                    continue
                 if i in used and len(used) >= len(self.tracks):
                     # All tracks used — reset to allow repeats
                     pass
@@ -297,12 +309,16 @@ class RotationEngine:
                 # No valid candidates (all filtered by gap rules).
                 # Relax: pick any unused track, or if all used, pick best-scored.
                 for i, track in enumerate(self.tracks):
+                    if str(track.get("kind") or "").lower() in _SHORT_FORM_KINDS:
+                        continue
                     if i not in used:
                         candidates.append((self._score(track, playlist), i))
                 if not candidates:
                     # Every track used and all filtered — allow repeats
                     used.clear()
                     for i, track in enumerate(self.tracks):
+                        if str(track.get("kind") or "").lower() in _SHORT_FORM_KINDS:
+                            continue
                         candidates.append((self._score(track, playlist), i))
 
             if not candidates:
@@ -339,7 +355,21 @@ def _marker_value(item) -> str | None:
 
 
 def _is_marker(item) -> bool:
-    return _marker_value(item) is not None
+    return _marker_value(item) is not None or _clock_marker_value(item) is not None
+
+
+def _clock_marker_value(item) -> str | None:
+    """Return the substituted-event marker for a dict carrying ``_clock_marker``.
+
+    A clock slot that resolves to a tagged short-form audio file (sweeper or
+    jingle) is rendered as a full track dict annotated with ``_clock_marker``
+    rather than a plain ``{"marker": ...}`` event. ``_marker_value`` only
+    recognises the latter, so the sidecar and CLI summary would otherwise
+    treat these substituted files as ordinary music tracks.
+    """
+    if isinstance(item, dict) and item.get("_clock_marker"):
+        return str(item["_clock_marker"])
+    return None
 
 
 def _track_dict(item) -> dict:
@@ -404,7 +434,7 @@ def write_json_sidecar(tracks: list[dict | str], output_path: str,
     if any(_is_marker(item) for item in tracks):
         clock_items = []
         for i, item in enumerate(tracks):
-            marker = _marker_value(item)
+            marker = _marker_value(item) or _clock_marker_value(item)
             if marker is not None:
                 clock_items.append(
                     {

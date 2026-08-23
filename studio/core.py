@@ -599,7 +599,7 @@ def build_broadcast_library(library, categories):
     for track in library:
         cat_id = track.get("category") or ""
         code = code_for.get(cat_id) if cat_id else None
-        out.append({
+        item = {
             "path": track.get("path", ""),
             "artist": track.get("artist"),
             "title": track.get("title"),
@@ -607,7 +607,15 @@ def build_broadcast_library(library, categories):
             "category": code,
             "duration": float(track.get("duration") or 0),
             "replaygain_track_gain": None,
-        })
+        }
+        # Preserve short-form audio kinds so the broadcast rotation engine can
+        # keep sweepers/jingles out of normal music blocks. Without this the
+        # studio bridge would hand playlistgen a library where these files are
+        # indistinguishable from songs.
+        kind = (track.get("kind") or "").strip().lower()
+        if kind in ("sweeper", "jingle"):
+            item["kind"] = kind
+        out.append(item)
     return out
 
 
