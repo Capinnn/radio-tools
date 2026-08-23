@@ -1,0 +1,5 @@
+# Cross-platform radio engine manager (radio CLI).
+# Placeholder: another agent is building the liquidsoap/engine/ code.
+# This directory is intentionally left empty so that the engine agent can own it.
+# The Windows packaging in windows/install.ps1 already knows to look here for
+# the eventual `radio start` / `radio status` commands.
