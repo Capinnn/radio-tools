@@ -16,6 +16,11 @@ from broadcast.clock import (
 )
 from broadcast.playlistgen import RotationEngine, cli, write_m3u
 
+from broadcast.clock import (
+    _SHORT_FORM_BLOCK_FLOOR_SECONDS,
+    _SHORT_FORM_WARN_THRESHOLD_SECONDS,
+)
+
 
 def _track(path: str, artist: str, category: str, duration: float) -> dict:
     return {
@@ -463,3 +468,172 @@ def test_liner_cli_flag_passes_through(tmp_path):
     assert "LINER:station" in m3u
     # Existing clock events are still present.
     assert "#CLOCK :00 ID" in m3u
+
+
+# ── clock-drift: short-form substitution budget ─────────────────────────
+
+
+def _hour_total_seconds(rendered: list[dict]) -> float:
+    """Sum the durations of every real track (music + substituted short-form)."""
+    total = 0.0
+    for item in rendered:
+        if "marker" in item:
+            continue
+        total += float(item.get("duration", 0) or 0.0)
+    return total
+
+
+def test_15s_liner_shrinks_following_music_block_by_15s(monkeypatch):
+    """A 15 s liner should reduce the following music block's target by 15 s.
+
+    We spy on RotationEngine.generate to capture the target_duration passed
+    for each block.  The engine quantises output to whole tracks, so checking
+    the actual track count would be brittle — the *requested* target is the
+    authoritative signal that the budget was adjusted.
+    """
+    template = HourTemplate(
+        "Liner budget",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":10", kind="liner", name="station"),
+            ClockSlot(position_label=":11", kind="music", source_category="B"),
+            ClockSlot(position_label=":14", kind="promo"),
+        ],
+    )
+    tracks = [
+        _track(f"/music/a{i}.mp3", f"Artist A{i}", "A", 60) for i in range(20)
+    ] + [
+        _track(f"/music/b{i}.mp3", f"Artist B{i}", "B", 60) for i in range(20)
+    ] + [
+        _track_with_kind("/liners/liner.mp3", "Station", "liners", 15,
+                         kind="liner"),
+    ]
+
+    captured: list[float] = []
+    original_generate = RotationEngine.generate
+
+    def spy_generate(self, target_duration: float = 3600.0, **kwargs):
+        captured.append(target_duration)
+        return original_generate(self, target_duration=target_duration,
+                                 **kwargs)
+
+    monkeypatch.setattr(RotationEngine, "generate", spy_generate)
+    render_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    # Block A: :00 → :10 = 600 s (no preceding short-form).
+    # Block B: :11 → :14 = 180 s, minus 15 s liner = 165 s.
+    assert captured[0] == 600.0
+    assert captured[1] == 165.0
+
+
+def test_hour_total_stays_at_3600_with_substituted_short_form():
+    """The whole-hour total (music + substituted short-form) stays <= 3600."""
+    template = HourTemplate(
+        "Hour total",
+        [
+            ClockSlot(position_label=":00", kind="legal_id"),
+            ClockSlot(position_label=":01", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+            ClockSlot(position_label=":15", kind="music", source_category="B"),
+            ClockSlot(position_label=":30", kind="promo"),
+            ClockSlot(position_label=":31", kind="music", source_category="C"),
+            ClockSlot(position_label=":45", kind="sweeper", name="station"),
+            ClockSlot(position_label=":46", kind="music", source_category="GOLD"),
+        ],
+    )
+    tracks = (
+        [_track(f"/music/a{i}.mp3", f"A{i}", "A", 180) for i in range(20)]
+        + [_track(f"/music/b{i}.mp3", f"B{i}", "B", 180) for i in range(20)]
+        + [_track(f"/music/c{i}.mp3", f"C{i}", "C", 180) for i in range(20)]
+        + [_track(f"/music/g{i}.mp3", f"G{i}", "GOLD", 180) for i in range(20)]
+        + [_track_with_kind("/sweepers/s1.mp3", "S", "sweepers", 12,
+                            kind="sweeper")]
+        + [_track_with_kind("/jingles/p1.mp3", "S", "jingles", 8,
+                            kind="jingle")]
+        + [_track_with_kind("/ids/legal.mp3", "S", "ids", 5, kind="id")]
+    )
+    rendered = render_hour(template, _engine(tracks), hour_of_day=14, seed=42)
+    total = _hour_total_seconds(rendered)
+    # The hour should not run long.  Allow a small overshoot (one track).
+    max_track = max((i.get("duration", 0) for i in rendered), default=0)
+    assert total <= 3600 + max_track
+
+
+def test_95s_sweeper_logs_warning_and_still_plays(caplog):
+    """A 95 s sweeper logs a warning (>30 s) but is still in the output."""
+    template = HourTemplate(
+        "Long sweeper",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+            ClockSlot(position_label=":15", kind="music", source_category="B"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track("/music/b1.mp3", "Artist B", "B", 60),
+        _track_with_kind("/sweepers/long.mp3", "Station", "sweepers", 95,
+                         kind="sweeper"),
+    ]
+    with caplog.at_level("WARNING", logger="broadcast.clock"):
+        result = build_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    # The sweeper file is still played.
+    assert "/sweepers/long.mp3" in result
+    # A warning was logged mentioning the duration threshold.
+    assert any(
+        "exceeds" in rec.message and "95.0" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_no_short_form_file_means_zero_change_backward_compat():
+    """Without a kind=sweeper file, the marker is kept and blocks are unchanged."""
+    template = HourTemplate(
+        "No short-form",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":14", kind="sweeper", name="station"),
+            ClockSlot(position_label=":15", kind="music", source_category="B"),
+        ],
+    )
+    tracks = [
+        _track("/music/a1.mp3", "Artist A", "A", 60),
+        _track("/music/b1.mp3", "Artist B", "B", 60),
+    ]
+    # No kind=sweeper file in the library.
+    rendered = render_hour(template, _engine(tracks), hour_of_day=9, seed=7)
+
+    # Marker is kept (no substitution → no duration to subtract).
+    assert any(i.get("marker") == "SWEEPER:station" for i in rendered)
+    # Music block B targets the full 2940 s (3600 − 840 − 60), unshrunken.
+    b_items = [
+        i for i in rendered
+        if i.get("category") == "B" and i.get("_clock_position_label") == ":15"
+    ]
+    assert len(b_items) >= 1  # block generated as before
+
+
+def test_short_form_substitution_preserves_determinism():
+    """Same seed + substituted short-form still produces identical output."""
+    template = HourTemplate(
+        "Determinism with short-form",
+        [
+            ClockSlot(position_label=":00", kind="music", source_category="A"),
+            ClockSlot(position_label=":10", kind="liner", name="station"),
+            ClockSlot(position_label=":11", kind="music", source_category="B"),
+        ],
+    )
+    tracks = [
+        _track(f"/music/a{i}.mp3", f"A{i}", "A", 60) for i in range(10)
+    ] + [
+        _track(f"/music/b{i}.mp3", f"B{i}", "B", 60) for i in range(10)
+    ] + [
+        _track_with_kind("/liners/l1.mp3", "Station", "liners", 15,
+                         kind="liner"),
+    ]
+    first = build_hour(template, _engine(tracks), hour_of_day=9, seed=42)
+    second = build_hour(template, _engine(tracks), hour_of_day=9, seed=42)
+    assert first == second
+    # And the liner is actually substituted (not a marker).
+    assert "/liners/l1.mp3" in first

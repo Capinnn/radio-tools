@@ -8,6 +8,7 @@ existing artist/title separation rules remain the source of truth.
 from __future__ import annotations
 
 import copy
+import logging
 import random
 import re
 from dataclasses import dataclass
@@ -18,6 +19,17 @@ from .playlistgen import RotationEngine
 _POSITION_LABEL_RE = re.compile(r"^:(\d{2})(?::(\d{2}))?$")
 _MUSIC_KIND = "music"
 _MUSIC_KINDS = {_MUSIC_KIND, "category"}
+
+# When a short-form audio file (sweeper/liner/ID/jingle) is substituted for a
+# clock marker, its real duration eats into the hour.  We subtract that
+# duration from the following music block so the hour total stays at 3600s.
+# If the subtraction would shrink the block below this floor, we keep the
+# floor and let the hour run long by the unabsorbed excess (documented
+# fallback — see render_hour docstring).
+_SHORT_FORM_BLOCK_FLOOR_SECONDS = 60.0
+_SHORT_FORM_WARN_THRESHOLD_SECONDS = 30.0
+
+_log = logging.getLogger(__name__)
 
 
 class ClockMarker(str):
@@ -302,7 +314,10 @@ def _pick_short_form_track(
 
     Selection is deterministic for a given (seed, hour, slot_index): the
     RNG is seeded from those values so the same inputs always pick the
-    same file.
+    same file.  When the chosen track's duration exceeds
+    :data:`_SHORT_FORM_WARN_THRESHOLD_SECONDS` (30 s), a warning is logged
+    so operators notice unusually long sweepers/liners that would eat
+    heavily into the following music block.
     """
     event_kind = slot.event_kind
     if event_kind is None:
@@ -317,9 +332,18 @@ def _pick_short_form_track(
     if not candidates:
         return None
     rng = random.Random(f"clock-shortform:{int(seed)}:{hour_of_day}:{slot_index}")
-    return sorted(candidates, key=lambda t: t.get("path") or t.get("id") or "")[
+    chosen = sorted(candidates, key=lambda t: t.get("path") or t.get("id") or "")[
         rng.randrange(len(candidates))
     ]
+    duration = float(chosen.get("duration", 0) or 0.0)
+    if duration > _SHORT_FORM_WARN_THRESHOLD_SECONDS:
+        _log.warning(
+            "clock short-form %s at %s (%s) is %.1fs — exceeds %.0fs; "
+            "it will shrink the following music block by its full duration",
+            track_kind, slot.label, slot.marker, duration,
+            _SHORT_FORM_WARN_THRESHOLD_SECONDS,
+        )
+    return chosen
 
 
 def _block_rotation(engine: RotationEngine, slot: ClockSlot) -> dict:
@@ -359,6 +383,27 @@ def render_hour(
     Track dictionaries retain the complete library metadata and gain private
     ``_clock_*`` annotations used by the output writers. Call :func:`build_hour`
     when only the public path/marker sequence is needed.
+
+    Clock-drift correction
+    ----------------------
+    When a short-form audio file (sweeper/liner/ID/jingle) is substituted for a
+    clock event marker, its real duration consumes time inside the hour.  To
+    keep the hour total at 3600 s, that duration is subtracted from the music
+    block that **follows** the event:
+
+        effective_block_seconds = slot_seconds − substituted_durations_in_slot
+
+    where ``slot_seconds`` is the wall-clock span between the music slot's
+    position and the next slot's position.  The accumulated short-form
+    duration is carried forward from all preceding event slots since the last
+    music block, so multiple sweepers between two music blocks compound.
+
+    Fallback (floor): if the subtraction would shrink a music block below
+    :data:`_SHORT_FORM_BLOCK_FLOOR_SECONDS` (60 s), the block is clamped to
+    the floor and the unabsorbed excess is dropped — the hour may then run
+    long by that excess.  This prevents pathological cases (a 95 s sweeper
+    ahead of a 120 s block) from producing an empty or 25 s block that the
+    rotation engine cannot fill.
     """
     if isinstance(hour_of_day, bool) or not isinstance(hour_of_day, int):
         raise TypeError("hour_of_day must be an integer")
@@ -367,6 +412,9 @@ def render_hour(
 
     rendered: list[dict] = []
     music_history: list[dict] = []
+    # Accumulated real-world duration of short-form tracks substituted since
+    # the last music block.  Reset to 0 after each music block consumes it.
+    pending_short_form_seconds: float = 0.0
 
     for index, slot in enumerate(template.slots):
         if not slot.is_music:
@@ -383,6 +431,11 @@ def render_hour(
                 item["_clock_kind"] = slot.event_kind
                 item["_clock_marker"] = slot.marker
                 rendered.append(item)
+                # Accumulate the real duration so the next music block
+                # shrinks by it, keeping the hour at 3600 s.
+                pending_short_form_seconds += float(
+                    item.get("duration", 0) or 0.0
+                )
             else:
                 rendered.append(
                     {
@@ -401,7 +454,25 @@ def render_hour(
         )
         block_duration = float(block_end - slot.offset_seconds)
         if block_duration <= 0:
+            # Degenerate slot; still reset the accumulator.
+            pending_short_form_seconds = 0.0
             continue
+
+        # Subtract the duration of short-form tracks that were substituted
+        # since the previous music block, so the hour total stays at 3600 s.
+        if pending_short_form_seconds > 0:
+            block_duration -= pending_short_form_seconds
+            if block_duration < _SHORT_FORM_BLOCK_FLOOR_SECONDS:
+                _log.warning(
+                    "clock music block at %s would shrink to %.1fs after "
+                    "absorbing %.1fs of short-form audio; clamping to "
+                    "%.0fs floor — hour may run long",
+                    slot.label, block_duration, pending_short_form_seconds,
+                    _SHORT_FORM_BLOCK_FLOOR_SECONDS,
+                )
+                block_duration = _SHORT_FORM_BLOCK_FLOOR_SECONDS
+            # The accumulator is consumed by this block.
+            pending_short_form_seconds = 0.0
 
         source = (slot.source_category or "").upper()
         category_tracks = [
