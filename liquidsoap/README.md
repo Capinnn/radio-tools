@@ -6,9 +6,9 @@ ReplayGain and a four-second crossfade, and sends `/radio.mp3` to Icecast.
 Silence with a `Rotation unavailable` title keeps the mount alive when the
 playlist is absent or empty.
 
-The lifecycle is driven by the `radio` command — a cross-platform Python
-engine manager (`engine/`) that works on both Linux and Windows. The legacy
-bash scripts in `bin/` still work on Linux but are superseded.
+The lifecycle is driven by the `radio` command, a cross-platform Python engine
+manager in `engine/` that works the same way on Linux and Windows. The bash
+scripts in `bin/` still run on Linux but are legacy.
 
 ## First setup
 
@@ -91,13 +91,15 @@ files. Start and stop refuse to run as root unless `--force-root` is explicit.
 ## Command reference
 
 ```
-radio start [--live] [--force-root]
+radio start [--live] [--force-root] [--dry-run]
     Start Icecast then Liquidsoap. Default mode is station rotation;
-    --live selects the live-assist script.
+    --live selects the live-assist script (Linux only; it needs PulseAudio
+    or JACK). --dry-run validates without starting anything.
 
-radio stop [--force-root]
-    Stop Liquidsoap first, then Icecast. PID files and the rendered
-    runtime config are removed; logs are retained.
+radio stop [--force-root] [--dry-run]
+    Stop Liquidsoap first, then Icecast. PID files and the rendered runtime
+    config are removed; logs are retained. --dry-run reports what would be
+    stopped.
 
 radio status
     Report each component UP/DOWN with PID, plus Icecast listener count,
@@ -116,9 +118,14 @@ radio gen-playlist [OPTIONS]
     legacy gen-playlist.sh: --source, --library, --rotation, --output,
     --trigger, --slot, --daypart, --hour, --seed, --loop, --dry-run.
 
-radio bin-paths
-    Print resolved paths for liquidsoap and icecast binaries (env override
-    LIQUIDSOAP_BIN / ICECAST_BIN, then PATH, then platform defaults).
+radio bin-paths [--verbose]
+    Print resolved paths for liquidsoap and icecast binaries. --verbose lists
+    every candidate path tried when one is not found.
+
+radio paths [--show]
+    Print the platform, both binaries, the Icecast install root, the
+    web/admin directories the next start will use, and the config/log paths.
+    --show additionally lists the candidates tried for anything missing.
 ```
 
 ## Smoke test
@@ -140,8 +147,8 @@ radio smoke --keep
 
 ## Windows
 
-Windows support is via the new `radio` engine manager (Python). The legacy bash
-scripts in `bin/` do not work on Windows.
+Windows support is via the `radio` engine manager in `engine/`. The bash scripts
+in `bin/` do not work on Windows.
 
 ### Prerequisites
 
@@ -154,13 +161,6 @@ scripts in `bin/` do not work on Windows.
    `%ProgramFiles(x86)%\Icecast*\bin\icecast.exe` automatically. You can also
    set the `ICECAST_BIN` environment variable to the full path.
 
-   **Config path note:** on Windows the Icecast `<paths>` section in
-   `config/icecast.xml` references `/usr/share/icecast2/web` and
-   `/usr/share/icecast2/admin` which are Linux paths. You must edit the rendered
-   runtime config (or the template) to point at the `web` and `admin`
-   subdirectories inside your Icecast install directory, e.g.
-   `C:\Program Files\Icecast2 2.4.4\share\icecast\web` and `...\admin`.
-
 3. **Liquidsoap** — download the official Windows build from
    [liquidsoap.info/download](https://www.liquidsoap.info/download). Ensure
    `liquidsoap.exe` is on your PATH, or set `LIQUIDSOAP_BIN` to the full path.
@@ -171,7 +171,7 @@ scripts in `bin/` do not work on Windows.
 cd C:\path\to\radio-tools
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 5. **Create the secrets file** (once, gitignored):
@@ -200,8 +200,8 @@ On POSIX it uses `os.kill` with `SIGTERM`/`SIGKILL` and the `/proc` safety check
 ## Checks
 
 ```bash
-liquidsoap --check scripts/station.liq
-liquidsoap --check scripts/live.liq
+radio start --dry-run
+radio paths --show
 ../.venv/bin/python -m pytest tests -q
 ```
 
@@ -247,3 +247,20 @@ radio status
 ```bash
 radio stop
 ```
+
+## Legacy bash scripts
+
+The bash scripts in `bin/` still run on Linux and are kept for existing
+workflows. They are not the recommended path for new setups and do not work on
+Windows.
+
+| Script | Purpose |
+|--------|---------|
+| `bin/gen-playlist.sh` | Generate an hourly playlist using `playlistgen`. |
+| `bin/start.sh` | Start Icecast, then Liquidsoap. |
+| `bin/stop.sh` | Stop Liquidsoap, then Icecast. |
+| `bin/smoke.sh` | Capture stream audio and verify basic MP3 framing. |
+
+These scripts read the same `config/` files and write to the same `logs/` and
+`data/` directories as the `radio` CLI. Running both managers on the same machine
+is not recommended because each tracks its own PID files.

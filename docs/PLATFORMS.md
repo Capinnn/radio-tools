@@ -7,7 +7,7 @@ works on Windows today.
 |-------|-------------|-----------------|-------|
 | `broadcast/` CLI toolkit | Full | Full | Pure Python 3.11+ with `click` and `mutagen`. Installed via `pip install -e .` on both platforms. |
 | `studio/` Flask console | Full | Full | Browser console; WebAudio playback works everywhere. Runs from its own `.venv` on both platforms. |
-| `liquidsoap/` engine | Full | Full (station stream) | The `radio` CLI (`liquidsoap/engine/`) runs the `station.liq` playlist stream on both, resolving `icecast.exe` / `liquidsoap.exe` and the Icecast web/admin roots automatically. `scripts/live.liq` PulseAudio live-assist remains Linux only. |
+| `liquidsoap/` engine | Full | Full for station stream via the `radio` CLI; live assist Linux only | The `radio` CLI (`liquidsoap/engine/`) runs `station.liq` on both platforms, resolving `icecast.exe` / `liquidsoap.exe` and the Icecast web/admin roots automatically. `scripts/live.liq` PulseAudio live-assist remains Linux only. |
 
 ## Windows packaging
 
@@ -32,6 +32,15 @@ the search order and the environment overrides (`ICECAST_BIN`,
 
 See the root [`README.md`](../README.md) and the per-layer readmes in
 `broadcast/`, `studio/`, and `liquidsoap/`.
+
+## Verification status
+
+These labels reflect what has actually been run, not what is expected to work.
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Linux | live smoke PASS | `radio smoke` succeeds end to end on the maintainer's Linux machine as of 2026-08-22. |
+| Windows | scripts written, needs one real install run | The `radio` engine, path resolution, and `start --dry-run` are covered by tests, including Windows-specific helpers exercised from Linux. The full Windows install has not yet been run on a clean machine. |
 
 ## Notes
 
