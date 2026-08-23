@@ -609,11 +609,11 @@ def build_broadcast_library(library, categories):
             "replaygain_track_gain": None,
         }
         # Preserve short-form audio kinds so the broadcast rotation engine can
-        # keep sweepers/jingles/liners out of normal music blocks. Without this
-        # the studio bridge would hand playlistgen a library where these files
-        # are indistinguishable from songs.
+        # keep sweepers/jingles/liners/ids out of normal music blocks. Without
+        # this the studio bridge would hand playlistgen a library where these
+        # files are indistinguishable from songs.
         kind = (track.get("kind") or "").strip().lower()
-        if kind in ("sweeper", "jingle", "liner"):
+        if kind in ("sweeper", "jingle", "liner", "id"):
             item["kind"] = kind
         out.append(item)
     return out
@@ -888,21 +888,46 @@ class Store:
                     if existing and existing.get("mtime") == stat.st_mtime:
                         continue
                     tags = read_tags(full)
-                    # Recognise sweepers/, jingles/, and liners/ subfolders
-                    # under the music root. Files there get a kind metadata
-                    # field and their category set to the subfolder name.
+                    # Recognise imaging subfolders under the music root.
+                    # Files there get a kind metadata field and their category
+                    # set to the subfolder name. Two layouts are supported:
+                    #
+                    #   1. Flat top-level folders: music/sweepers/, music/jingles/,
+                    #      music/liners/ — kind inferred from rel.parts[0].
+                    #   2. The _imaging/ umbrella: music/_imaging/sweepers/,
+                    #      music/_imaging/jingles/, etc. — when parts[0] is
+                    #      "_imaging", kind is inferred from rel.parts[1] instead.
+                    #      This lets all imaging live under one underscore-prefixed
+                    #      umbrella that sorts to the top of the folder listing.
+                    #
+                    # The "ids" subfolder maps to kind="id" so a real top-of-hour
+                    # legal-ID file can substitute the :00 marker (see clock.py's
+                    # _EVENT_KIND_TO_TRACK_KIND). "stingers" have no clock slot
+                    # yet and are not inferred — they scan in as plain music.
                     top_folder = rel.parts[0] if len(rel.parts) > 1 else ""
+                    kind_folder = top_folder
+                    if top_folder == "_imaging" and len(rel.parts) >= 3:
+                        # files directly under _imaging/ (parts == 2) have no
+                        # subfolder, so they fall through as plain music.
+                        kind_folder = rel.parts[1]
                     inferred_kind = ""
                     inferred_category = ""
-                    if top_folder.lower() == "sweepers":
+                    folder_lower = kind_folder.lower()
+                    if folder_lower == "sweepers":
                         inferred_kind = "sweeper"
-                        inferred_category = top_folder
-                    elif top_folder.lower() == "jingles":
+                        inferred_category = kind_folder
+                    elif folder_lower == "jingles":
                         inferred_kind = "jingle"
-                        inferred_category = top_folder
-                    elif top_folder.lower() == "liners":
+                        inferred_category = kind_folder
+                    elif folder_lower == "liners":
                         inferred_kind = "liner"
-                        inferred_category = top_folder
+                        inferred_category = kind_folder
+                    elif folder_lower == "ids":
+                        # Legal station IDs. The clock's legal_id slot
+                        # substitutes kind="id" files for the :00 text marker
+                        # (see broadcast/clock._EVENT_KIND_TO_TRACK_KIND).
+                        inferred_kind = "id"
+                        inferred_category = kind_folder
                     if existing:
                         # A rescan after an on-disk edit should win, but a
                         # field the user cleared in the app stays cleared.

@@ -282,7 +282,12 @@ def with_liners(
 # When a slot is sweeper or promo, build_hour looks for a library track
 # tagged with the corresponding kind and uses its path instead of the
 # plain text marker. If none is available, the marker is kept.
+#
+# ``legal_id`` maps to ``kind="id"`` so a real top-of-hour legal-ID file
+# (from the ``_imaging/ids/`` folder) can substitute the ``:00`` text marker
+# the same way sweepers and jingles substitute their slots.
 _EVENT_KIND_TO_TRACK_KIND = {
+    "legal_id": "id",
     "sweeper": "sweeper",
     "promo": "jingle",
     "liner": "liner",

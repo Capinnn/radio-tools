@@ -49,8 +49,9 @@ AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wav", ".wma"}
 
 # Library track kinds that are short-form station audio, not music. These must
 # never be selected as music tracks by the flat rotation engine; they only
-# air at clock event slots via _pick_short_form_track().
-_SHORT_FORM_KINDS = frozenset(("sweeper", "jingle", "liner"))
+# air at clock event slots via _pick_short_form_track(). "id" covers legal
+# station IDs that substitute the :00 legal_id marker.
+_SHORT_FORM_KINDS = frozenset(("sweeper", "jingle", "liner", "id"))
 
 
 def _detect_category(path: str, artist: str, title: str) -> str | None:

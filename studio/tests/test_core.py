@@ -101,6 +101,117 @@ def test_scan_tags_liners_subfolder(store, music_dir):
     assert liner["category"] == "liners"
 
 
+def test_scan_tags_imaging_umbrella_sweepers(store, music_dir):
+    """Files under _imaging/sweepers/ get kind='sweeper' and category='sweepers'."""
+    from make_test_tracks import write_tone
+    sweepers = music_dir / "_imaging" / "sweepers"
+    sweepers.mkdir(parents=True)
+    write_tone(str(sweepers / "station-id.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    sweeper = next(t for t in library if t["filename"] == "station-id.wav")
+    assert sweeper["kind"] == "sweeper"
+    assert sweeper["category"] == "sweepers"
+
+
+def test_scan_tags_imaging_umbrella_ids(store, music_dir):
+    """Files under _imaging/ids/ get kind='id' and category='ids'."""
+    from make_test_tracks import write_tone
+    ids = music_dir / "_imaging" / "ids"
+    ids.mkdir(parents=True)
+    write_tone(str(ids / "TOH_01.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    id_track = next(t for t in library if t["filename"] == "TOH_01.wav")
+    assert id_track["kind"] == "id"
+    assert id_track["category"] == "ids"
+
+
+def test_scan_imaging_umbrella_jingles_and_liners(store, music_dir):
+    """Jingles and liners under _imaging/ are also inferred from parts[1]."""
+    from make_test_tracks import write_tone
+    jingles = music_dir / "_imaging" / "jingles"
+    jingles.mkdir(parents=True)
+    write_tone(str(jingles / "promo.wav"), 440.0, 1.0)
+    liners = music_dir / "_imaging" / "liners"
+    liners.mkdir(parents=True)
+    write_tone(str(liners / "opener.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    jingle = next(t for t in library if t["filename"] == "promo.wav")
+    liner = next(t for t in library if t["filename"] == "opener.wav")
+    assert jingle["kind"] == "jingle"
+    assert jingle["category"] == "jingles"
+    assert liner["kind"] == "liner"
+    assert liner["category"] == "liners"
+
+
+def test_scan_imaging_umbrella_nested_deeper(store, music_dir):
+    """Files nested deeper under _imaging/sweepers/sub/ still get kind='sweeper'."""
+    from make_test_tracks import write_tone
+    nested = music_dir / "_imaging" / "sweepers" / "station-a"
+    nested.mkdir(parents=True)
+    write_tone(str(nested / "deep.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    track = next(t for t in library if t["filename"] == "deep.wav")
+    assert track["kind"] == "sweeper"
+    assert track["category"] == "sweepers"
+
+
+def test_scan_top_level_sweepers_unchanged(store, music_dir):
+    """Flat top-level sweepers/ (not under _imaging/) still works as before."""
+    from make_test_tracks import write_tone
+    sweepers = music_dir / "sweepers"
+    sweepers.mkdir()
+    write_tone(str(sweepers / "flat-id.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    sweeper = next(t for t in library if t["filename"] == "flat-id.wav")
+    assert sweeper["kind"] == "sweeper"
+    assert sweeper["category"] == "sweepers"
+
+
+def test_clock_legal_id_substitutes_id_file(store, music_dir):
+    """When a kind='id' file is present, the :00 legal_id slot plays it
+    instead of rendering the plain 'ID' text marker."""
+    from make_test_tracks import write_tone
+    from broadcast.clock import ClockSlot, HourTemplate, build_hour
+    from broadcast.playlistgen import RotationEngine
+
+    # Scan in a legal ID file under the _imaging umbrella.
+    ids = music_dir / "_imaging" / "ids"
+    ids.mkdir(parents=True)
+    write_tone(str(ids / "TOH_01.wav"), 440.0, 1.0)
+    store.scan()
+    library = store.library()
+    id_track = next(t for t in library if t["filename"] == "TOH_01.wav")
+    assert id_track["kind"] == "id"
+
+    # Build a broadcast-format library + engine with the id track.
+    tracks = [
+        {"path": "/music/a1.mp3", "artist": "Artist A", "title": "A",
+         "category": "A", "duration": 60},
+        {"path": id_track["path"], "artist": "Station", "title": "TOH 01",
+         "category": "ids", "duration": 10, "kind": "id"},
+    ]
+    rotation = {
+        "categories": {"A": {"sph": 1}},
+        "rules": {"artist_gap": 2, "title_gap": 1, "category_gap": 1},
+    }
+    engine = RotationEngine(tracks, rotation, seed=999)
+
+    template = HourTemplate("Legal ID sub", [
+        ClockSlot(position_label=":00", kind="legal_id"),
+        ClockSlot(position_label=":01", kind="music", source_category="A"),
+    ])
+    result = build_hour(template, engine, hour_of_day=9, seed=7)
+
+    # The :00 slot should be the id file path, not the "ID" marker.
+    assert id_track["path"] in result
+    assert "ID" not in result
+
+
 def test_scan_music_files_have_no_kind(store):
     """Regular music files should not have a kind tag (or it is empty)."""
     store.scan()
