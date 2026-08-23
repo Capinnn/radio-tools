@@ -741,10 +741,25 @@ function renderQueue() {
     `;
     row.querySelector('.q-title').textContent = track ? track.title : 'Missing track';
     const artistEl = row.querySelector('.q-artist');
-    const badge = item.source === 'playlistgen' ? ' · rotation' : item.source === 'fallback' ? ' · auto' : '';
-    artistEl.textContent = track
-      ? (item.auto ? `${track.artist} · auto${badge}` : track.artist)
-      : 'the file is no longer in the library';
+    // Source-specific chip: the rotation engine is the primary path (cyan),
+    // the built-in picker fallback gets amber to flag it on the queue rows.
+    const badgeHtml = item.source === 'fallback'
+      ? '<span class="q-badge q-badge-fallback">fallback</span>'
+      : item.source === 'playlistgen'
+        ? '<span class="q-badge q-badge-rotation">rotation</span>'
+        : '';
+    if (track) {
+      artistEl.textContent = item.auto ? `${track.artist} · auto` : track.artist;
+    } else {
+      artistEl.textContent = 'the file is no longer in the library';
+    }
+    if (badgeHtml) {
+      // Build via a <template> so the HTML is parsed once and the chip sits
+      // inline after the artist text without re-rendering the row.
+      const template = document.createElement('template');
+      template.innerHTML = badgeHtml;
+      artistEl.appendChild(template.content.firstChild);
+    }
     if (item.auto) artistEl.classList.add('q-auto');
     fragment.appendChild(row);
   });
